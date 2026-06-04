@@ -1,0 +1,580 @@
+[
+  {
+    "id": "A01",
+    "name": "서울특별시 건축위원회 심의",
+    "category": "심의",
+    "law": "건축법 제4조, 건축법 시행령 제5조의5",
+    "agency": "서울시 건축기획과",
+    "conditions": {
+      "any": [
+        { "field": "연면적", "op": ">=", "value": 10000 },
+        { "field": "층수", "op": ">=", "value": 16 },
+        { "field": "용도", "includes": ["초고층"] },
+        { "field": "구조", "includes": ["특수구조"] }
+      ]
+    },
+    "phase": "pre_review",
+    "duration_months": { "min": 2, "max": 3 },
+    "steps": [
+      { "name": "도서작성 및 사전협의 (구·서울시)", "months": 1 },
+      { "name": "건축위원회 심의 및 조치계획 작성", "months": 1 },
+      { "name": "보완 협의", "months": 1 }
+    ],
+    "note": "건축허가 전 필수. 서울시 건축위원회 매월 개최"
+  },
+  {
+    "id": "A02",
+    "name": "교통영향평가",
+    "category": "평가",
+    "law": "도시교통정비 촉진법 제15조, 서울시 교통영향분석·개선대책 수립에 관한 조례",
+    "agency": "관할구청(교통행정과) → 서울시 교통운영과 심의",
+    "conditions": {
+      "any": [
+        { "field": "연면적", "op": ">=", "value": 30000 },
+        { "field": "용도", "includes": ["판매시설", "숙박시설"] },
+        { "field": "세대수", "op": ">=", "value": 100 }
+      ]
+    },
+    "phase": "pre_review",
+    "duration_months": { "min": 2, "max": 4 },
+    "steps": [
+      { "name": "도서 작성", "months": 1 },
+      { "name": "유관부서 협의 및 심의", "months": 1 },
+      { "name": "심의의결사항 보완 협의", "months": 1 }
+    ],
+    "note": "건축심의 접수 前, 건축허가 접수 前 완료 필요"
+  },
+  {
+    "id": "A03",
+    "name": "환경영향평가",
+    "category": "평가",
+    "law": "환경영향평가법 제42조, 서울시 환경영향평가 조례 제4조",
+    "agency": "서울시 환경정책과 협의 → 서울시 환경영향평가 심의위원회",
+    "conditions": {
+      "all": [
+        { "field": "연면적", "op": ">=", "value": 100000 }
+      ]
+    },
+    "phase": "pre_review",
+    "duration_months": { "min": 5, "max": 8 },
+    "steps": [
+      { "name": "도서 작성", "months": 1 },
+      { "name": "주민공람 및 유관부서 의견수렴 (14일)", "months": 1 },
+      { "name": "도서 작성 (보완)", "months": 1 },
+      { "name": "본안 심의", "months": 1 },
+      { "name": "보완서 작성 및 협의", "months": 1 },
+      { "name": "추가자료 작성 및 협의", "months": 1 }
+    ],
+    "note": "1차: 건축심의 접수 전 / 2차: 건축허가 완료 전 사후검토"
+  },
+  {
+    "id": "A04",
+    "name": "소방성능위주설계 심의",
+    "category": "심의",
+    "law": "소방시설 공사업법 제11조, 화재예방·소방시설 설치유지 및 안전관리법",
+    "agency": "관할소방서 → 서울시 소방재난본부 심의",
+    "conditions": {
+      "any": [
+        { "field": "연면적", "op": ">=", "value": 200000 },
+        { "field": "층수", "op": ">=", "value": 30 },
+        { "field": "용도", "includes": ["지하상가", "터널"] }
+      ]
+    },
+    "phase": "pre_review",
+    "duration_months": { "min": 6, "max": 8 },
+    "steps": [
+      { "name": "사전검토 준비 (소방시설 설계업)", "months": 1 },
+      { "name": "성능위주설계 확인평가단 심의회 (1차)", "months": 1 },
+      { "name": "보완 작성", "months": 1 },
+      { "name": "신고서 준비 (소방시설 설계업)", "months": 1 },
+      { "name": "성능위주설계 확인평가단 심의회 (2차)", "months": 1 },
+      { "name": "심의결과 통보 및 건축허가 동의", "months": 1 }
+    ],
+    "note": "건축심의 접수 前 1차 완료, 건축허가 완료 前 2차 완료"
+  },
+  {
+    "id": "A05",
+    "name": "재해영향평가",
+    "category": "평가",
+    "law": "자연재해대책법 제4조, 제5조",
+    "agency": "관할구청 도시안전과",
+    "conditions": {
+      "any": [
+        { "field": "대지면적", "op": ">=", "value": 5000 }
+      ]
+    },
+    "phase": "pre_review",
+    "duration_months": { "min": 2, "max": 3 },
+    "steps": [
+      { "name": "도서 작성", "months": 1 },
+      { "name": "서면심의", "months": 1 },
+      { "name": "조치계획 및 위원 확인", "months": 0.5 }
+    ],
+    "note": "건축심의와 동시 진행 가능"
+  },
+  {
+    "id": "A06",
+    "name": "교육환경평가",
+    "category": "평가",
+    "law": "교육환경 보호에 관한 법률 제6조",
+    "agency": "서울시 교육청, 관할구 교육지원청",
+    "conditions": {
+      "any": [
+        {
+          "all": [
+            { "field": "학교거리", "op": "<=", "value": 200 },
+            { "field": "층수", "op": ">=", "value": 21 }
+          ]
+        },
+        { "field": "사업유형", "includes": ["정비사업", "재개발", "재건축"] }
+      ]
+    },
+    "phase": "pre_review",
+    "duration_months": { "min": 3, "max": 5 },
+    "steps": [
+      { "name": "사전검토 및 도서작성", "months": 1 },
+      { "name": "전문기관·교육청·학교 협의", "months": 1 },
+      { "name": "관련과 협의·심의 및 보완", "months": 1 }
+    ],
+    "note": "건축허가 신청 예정일 60일 전 완료 필수"
+  },
+  {
+    "id": "A07",
+    "name": "에너지사용계획 협의",
+    "category": "협의",
+    "law": "에너지이용합리화법 제10조, 시행령 제20조",
+    "agency": "산업통상자원부 에너지수요관리과 → 한국에너지공단",
+    "conditions": {
+      "any": [
+        { "field": "연면적", "op": ">=", "value": 20000 }
+      ]
+    },
+    "phase": "post_review",
+    "duration_months": { "min": 3, "max": 4 },
+    "steps": [
+      { "name": "보고서 작성", "months": 1 },
+      { "name": "협의 및 심의", "months": 1 },
+      { "name": "최종협의 및 결재", "months": 1 }
+    ],
+    "note": "건축심의 완료 후 접수, 건축허가 접수 전 완료"
+  },
+  {
+    "id": "A08",
+    "name": "지하안전영향평가",
+    "category": "평가",
+    "law": "지하안전관리에 관한 특별법 제14조",
+    "agency": "관할구청 → 서울지방국토관리청 협의",
+    "conditions": {
+      "any": [
+        { "field": "지하굴착깊이", "op": ">=", "value": 20 },
+        {
+          "all": [
+            { "field": "지하굴착깊이", "op": ">=", "value": 10 },
+            { "field": "지하굴착깊이", "op": "<", "value": 20 }
+          ]
+        }
+      ]
+    },
+    "subtype": {
+      "일반": { "condition": { "field": "지하굴착깊이", "op": ">=", "value": 20 } },
+      "소규모": {
+        "condition": {
+          "all": [
+            { "field": "지하굴착깊이", "op": ">=", "value": 10 },
+            { "field": "지하굴착깊이", "op": "<", "value": 20 }
+          ]
+        }
+      }
+    },
+    "phase": "post_review",
+    "duration_months": { "min": 2, "max": 3 },
+    "steps": [
+      { "name": "도서 작성", "months": 1 },
+      { "name": "유관부서 협의", "months": 1 },
+      { "name": "보완 및 협의", "months": 0.5 }
+    ],
+    "note": "건축심의 완료 후, 건축허가 완료 전"
+  },
+  {
+    "id": "A09",
+    "name": "저영향개발 사전협의 (LID)",
+    "category": "협의",
+    "law": "서울시 빗물관리에 관한 조례",
+    "agency": "서울시 물순환정책과",
+    "conditions": {
+      "any": [
+        { "field": "대지면적", "op": ">=", "value": 1000 }
+      ]
+    },
+    "phase": "post_review",
+    "duration_months": { "min": 2, "max": 3 },
+    "steps": [
+      { "name": "도서 작성", "months": 1 },
+      { "name": "대면심의", "months": 0.5 },
+      { "name": "보완 협의", "months": 0.5 }
+    ],
+    "note": "건축허가 접수 전 완료"
+  },
+  {
+    "id": "A10",
+    "name": "문화재 지표조사",
+    "category": "조사",
+    "law": "매장문화재 보호 및 조사에 관한 법률",
+    "agency": "문화재청, 한국문화재재단",
+    "conditions": {
+      "any": [
+        { "field": "대지면적", "op": ">=", "value": 30000 }
+      ]
+    },
+    "phase": "post_review",
+    "duration_months": { "min": 2, "max": 6 },
+    "steps": [
+      { "name": "문화재 지표조사 (1~2개월)", "months": 2 },
+      { "name": "문화재 표본·시굴조사 (조건부)", "months": 3 }
+    ],
+    "note": "사업면적 30,000㎡ 이상. 유적 발견 시 기간 대폭 증가"
+  },
+  {
+    "id": "A11",
+    "name": "수질오염총량제",
+    "category": "협의",
+    "law": "물환경보전법 제4조의7, 한강수계 물관리 및 주민지원 등에 관한 법률",
+    "agency": "한강유역환경청, 서울시 상수도사업본부",
+    "conditions": {
+      "all": [
+        {
+          "any": [
+            { "field": "시도", "includes": ["서울특별시", "경기도", "인천광역시"] }
+          ]
+        },
+        {
+          "any": [
+            { "field": "연면적", "op": ">=", "value": 3000 },
+            { "field": "용도", "includes": ["숙박시설", "의료시설", "공동주택", "업무시설"] }
+          ]
+        }
+      ]
+    },
+    "phase": "post_review",
+    "duration_months": { "min": 1, "max": 2 },
+    "steps": [
+      { "name": "도서 작성", "months": 0.5 },
+      { "name": "유관부서 협의", "months": 1 }
+    ],
+    "note": "한강수계 지역(서울·경기·인천) + 연면적 3,000㎡ 이상 또는 오·폐수 다량발생 용도. 소규모 근린생활시설은 미해당"
+  },
+  {
+    "id": "A12",
+    "name": "군보심의 (대공방어협조구역 위탁고도)",
+    "category": "심의",
+    "law": "군사기지 및 군사시설 보호법 제13조",
+    "agency": "관할 군부대",
+    "conditions": {
+      "all": [
+        {
+          "any": [
+            { "field": "기타지구", "includes": ["대공방어협조구역"] }
+          ]
+        },
+        {
+          "any": [
+            { "field": "층수", "op": ">=", "value": 4 }
+          ]
+        }
+      ]
+    },
+    "phase": "post_review",
+    "duration_months": { "min": 1, "max": 3 },
+    "steps": [
+      { "name": "토지이음 위탁고도(하한~상한) 확인", "months": 0.2 },
+      { "name": "도서 작성 (위탁고도 검토서 포함)", "months": 0.5 },
+      { "name": "관할 군부대 협의 및 군보심의", "months": 1 }
+    ],
+    "note": "⚠️ 대공방어협조구역 내 건축물 높이가 위탁고도 상한 초과 시에만 해당. 토지이음에서 위탁고도(하한~상한) 반드시 사전 확인 필수. 미초과 시 군보심의 불필요"
+  },
+  {
+    "id": "A13",
+    "name": "에너지절약계획서",
+    "category": "협의",
+    "law": "녹색건축물 조성 지원법 제14조",
+    "agency": "관할구청 (에너지관리공단 검토)",
+    "conditions": {
+      "any": [
+        { "field": "연면적", "op": ">=", "value": 500 }
+      ]
+    },
+    "phase": "post_permit",
+    "duration_months": { "min": 1, "max": 2 },
+    "steps": [
+      { "name": "도서 작성 및 검토", "months": 1 },
+      { "name": "유관부서 협의 및 제출", "months": 0.5 }
+    ],
+    "note": "건축허가 신청 시 첨부. 500㎡ 이상 전 용도"
+  },
+  {
+    "id": "A14",
+    "name": "친환경주택 성능평가",
+    "category": "인증",
+    "law": "주택법 시행규칙 제47조의2",
+    "agency": "국토교통부 지정 인증기관",
+    "conditions": {
+      "all": [
+        { "field": "용도", "includes": ["공동주택", "아파트", "다세대주택"] },
+        { "field": "세대수", "op": ">=", "value": 20 }
+      ]
+    },
+    "phase": "post_permit",
+    "duration_months": { "min": 1, "max": 2 },
+    "steps": [
+      { "name": "도서 작성", "months": 0.5 },
+      { "name": "유관부서 협의 및 인증 신청", "months": 1 }
+    ],
+    "note": "사업계획승인 대상 공동주택 20세대 이상"
+  },
+  {
+    "id": "A15",
+    "name": "장수명주택 인증",
+    "category": "인증",
+    "law": "주택법 제38조의2",
+    "agency": "한국건설기술연구원 등 인증기관",
+    "conditions": {
+      "all": [
+        { "field": "용도", "includes": ["공동주택", "아파트"] },
+        { "field": "세대수", "op": ">=", "value": 1000 }
+      ]
+    },
+    "phase": "post_permit",
+    "duration_months": { "min": 1, "max": 2 },
+    "steps": [
+      { "name": "도서 작성", "months": 0.5 },
+      { "name": "인증 협의 및 신청", "months": 1 }
+    ],
+    "note": "사업계획승인 대상 공동주택 1,000세대 이상"
+  },
+  {
+    "id": "A16",
+    "name": "건강친화형 주택 건설기준",
+    "category": "협의",
+    "law": "건강친화형 주택 건설기준",
+    "agency": "관할구청 (국토교통부 기준)",
+    "conditions": {
+      "all": [
+        { "field": "용도", "includes": ["공동주택", "아파트"] },
+        { "field": "세대수", "op": ">=", "value": 500 }
+      ]
+    },
+    "phase": "post_permit",
+    "duration_months": { "min": 1, "max": 1 },
+    "steps": [
+      { "name": "도서 작성 및 주관부서 협의", "months": 1 }
+    ],
+    "note": "500세대 이상 공동주택"
+  },
+  {
+    "id": "A17",
+    "name": "범죄예방환경설계 (CPTED)",
+    "category": "협의",
+    "law": "건축법 시행령 제61조의3, 건축물의 범죄예방 기준",
+    "agency": "관할구청, 관할경찰서",
+    "conditions": {
+      "any": [
+        { "field": "용도", "includes": ["공동주택", "아파트", "다세대주택", "근린생활시설"] },
+        { "field": "연면적", "op": ">=", "value": 5000 }
+      ]
+    },
+    "phase": "post_permit",
+    "duration_months": { "min": 1, "max": 2 },
+    "steps": [
+      { "name": "도서 작성", "months": 0.5 },
+      { "name": "유관부서 협의 및 검토", "months": 0.5 }
+    ],
+    "note": "건축허가 완료 전. 국토부 범죄예방 건축기준 동시 적용"
+  },
+  {
+    "id": "A18",
+    "name": "구조안전심의",
+    "category": "심의",
+    "law": "건축법 시행령 제91조의3",
+    "agency": "서울시 건축정책과 (구조위원회)",
+    "conditions": {
+      "any": [
+        { "field": "층수", "op": ">=", "value": 16 },
+        { "field": "연면적", "op": ">=", "value": 10000 },
+        { "field": "구조", "includes": ["특수구조", "장스팬"] }
+      ]
+    },
+    "phase": "pre_const",
+    "duration_months": { "min": 1, "max": 2 },
+    "steps": [
+      { "name": "도서 작성 및 구·시 사전협의", "months": 1 },
+      { "name": "구조안전심의 (서울시)", "months": 1 }
+    ],
+    "note": "사업시행인가 완료 후, 착공신고 전"
+  },
+  {
+    "id": "A19",
+    "name": "굴토심의",
+    "category": "심의",
+    "law": "건설기술진흥법, 서울시 굴토공사 심의 기준",
+    "agency": "서울시 안전총괄실",
+    "conditions": {
+      "any": [
+        { "field": "지하굴착깊이", "op": ">=", "value": 3 }
+      ]
+    },
+    "phase": "pre_const",
+    "duration_months": { "min": 1, "max": 2 },
+    "steps": [
+      { "name": "도서 작성 및 구·시 사전협의", "months": 1 },
+      { "name": "굴토심의 (서울시)", "months": 1 }
+    ],
+    "note": "사업시행인가 완료 후, 착공신고 전. 서울시 굴토심의위원회"
+  },
+  {
+    "id": "A20",
+    "name": "녹색건축인증 (G-SEED)",
+    "category": "인증",
+    "law": "녹색건축물 조성 지원법 제16조",
+    "agency": "한국그린빌딩협의회 등 인증기관",
+    "conditions": {
+      "any": [
+        { "field": "연면적", "op": ">=", "value": 3000 },
+        { "field": "용도", "includes": ["공공청사", "학교", "공동주택"] }
+      ]
+    },
+    "phase": "construction",
+    "duration_months": { "min": 6, "max": 10 },
+    "steps": [
+      { "name": "도서 작성", "months": 1 },
+      { "name": "인증기관 협의 (예비인증)", "months": 2 },
+      { "name": "보완사항 협의 및 처리", "months": 1 },
+      { "name": "인증기관 심사 및 보완", "months": 2 },
+      { "name": "시공 중 관리", "months": 2 },
+      { "name": "준공 후 본인증", "months": 2 }
+    ],
+    "note": "예비인증(착공 전) + 본인증(준공 후). 3,000㎡ 이상 민간 자율, 공공 의무"
+  },
+  {
+    "id": "A21",
+    "name": "건축물 에너지효율등급 인증",
+    "category": "인증",
+    "law": "녹색건축물 조성 지원법 제17조",
+    "agency": "한국에너지공단 등 인증기관",
+    "conditions": {
+      "any": [
+        { "field": "연면적", "op": ">=", "value": 500 }
+      ]
+    },
+    "phase": "construction",
+    "duration_months": { "min": 4, "max": 6 },
+    "steps": [
+      { "name": "도서 작성 및 예비인증 신청", "months": 1 },
+      { "name": "인증 협의 및 보완", "months": 1 },
+      { "name": "시공 관리", "months": 2 },
+      { "name": "준공 후 본인증", "months": 1 }
+    ],
+    "note": "500㎡ 이상. 에너지절약계획서와 함께 제출"
+  },
+  {
+    "id": "A22",
+    "name": "장애물 없는 생활환경 (BF) 인증",
+    "category": "인증",
+    "law": "장애인·노인·임산부 등의 편의증진보장에 관한 법률",
+    "agency": "한국장애인개발원 등 인증기관",
+    "conditions": {
+      "any": [
+        { "field": "용도", "includes": ["공공청사", "복지시설", "문화시설", "의료시설"] },
+        { "field": "연면적", "op": ">=", "value": 10000 }
+      ]
+    },
+    "phase": "construction",
+    "duration_months": { "min": 6, "max": 10 },
+    "steps": [
+      { "name": "예비인증 도서 작성", "months": 1 },
+      { "name": "인증기관 심사 (예비)", "months": 2 },
+      { "name": "심사의견 보완 조치", "months": 1 },
+      { "name": "시공 관리", "months": 2 },
+      { "name": "준공 후 본인증 신청 및 심사", "months": 2 }
+    ],
+    "note": "예비인증(설계단계) + 본인증(공사완료 후)"
+  },
+  {
+    "id": "A23",
+    "name": "결로방지 성능평가",
+    "category": "평가",
+    "law": "주택건설기준 등에 관한 규정",
+    "agency": "한국건설기술연구원",
+    "conditions": {
+      "all": [
+        { "field": "용도", "includes": ["공동주택", "아파트"] },
+        { "field": "세대수", "op": ">=", "value": 500 }
+      ]
+    },
+    "phase": "pre_const",
+    "duration_months": { "min": 1, "max": 2 },
+    "steps": [
+      { "name": "도서 작성", "months": 0.5 },
+      { "name": "인증 협의 및 보완", "months": 1 }
+    ],
+    "note": "사업시행인가 완료 후, 착공신고 전"
+  },
+  {
+    "id": "A24",
+    "name": "미술작품 설치",
+    "category": "심의",
+    "law": "문화예술진흥법 제9조 (건축물 미술작품)",
+    "agency": "서울시 문화정책과",
+    "conditions": {
+      "any": [
+        { "field": "연면적", "op": ">=", "value": 10000 }
+      ]
+    },
+    "phase": "pre_sale",
+    "duration_months": { "min": 1, "max": 2 },
+    "steps": [
+      { "name": "도서 작성 및 사전협의", "months": 1 },
+      { "name": "협의 및 심의 (서울시)", "months": 1 }
+    ],
+    "note": "연면적 1만㎡ 이상. 건축비의 일정 비율을 미술작품 설치에 사용"
+  },
+  {
+    "id": "A25",
+    "name": "초고속정보통신·홈네트워크 인증",
+    "category": "인증",
+    "law": "정보통신공사업법",
+    "agency": "한국정보통신진흥협회 (KAIT)",
+    "conditions": {
+      "any": [
+        { "field": "용도", "includes": ["공동주택", "아파트", "오피스텔"] }
+      ]
+    },
+    "phase": "pre_sale",
+    "duration_months": { "min": 3, "max": 5 },
+    "steps": [
+      { "name": "도서 작성", "months": 1 },
+      { "name": "인증 협의 (예비)", "months": 1 },
+      { "name": "시공 관리", "months": 1 },
+      { "name": "준공 전 본인증 신청", "months": 1 }
+    ],
+    "note": "공동주택 자율 인증. 분양 전 인증서 필요"
+  },
+  {
+    "id": "A26",
+    "name": "관광호텔 사업계획승인",
+    "category": "인허가",
+    "law": "관광진흥법 제15조",
+    "agency": "서울시 관광체육국",
+    "conditions": {
+      "any": [
+        { "field": "용도", "includes": ["관광호텔", "숙박시설"] }
+      ]
+    },
+    "phase": "post_review",
+    "duration_months": { "min": 2, "max": 4 },
+    "steps": [
+      { "name": "도서 작성 및 사전협의", "months": 1 },
+      { "name": "관광호텔 사업계획승인 협의", "months": 2 }
+    ],
+    "note": "건축심의 완료 후, 토지소유권 확보 후 신청"
+  }
+]
