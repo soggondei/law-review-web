@@ -1,3 +1,4 @@
+export const preferredRegion = ["icn1"];
 import { NextResponse } from "next/server";
 
 const LAWS = [

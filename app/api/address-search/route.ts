@@ -1,3 +1,4 @@
+export const preferredRegion = ["icn1"];
 import { NextRequest, NextResponse } from "next/server";
 
 const JUSO_KEY = process.env.JUSO_KEY!;

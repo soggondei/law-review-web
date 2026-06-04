@@ -1,3 +1,4 @@
+export const preferredRegion = ["icn1"];
 import { NextRequest, NextResponse } from "next/server";
 
 const NOTION_TOKEN = process.env.NOTION_TOKEN!;

@@ -1,3 +1,4 @@
+export const preferredRegion = ["icn1"];
 import { NextRequest, NextResponse } from "next/server";
 import { fetchAddressInfo, fetchBuildingInfo, fetchLandUseInfo, fetchZoneRates, getOrdinanceRates } from "@/lib/api";
 import { judgeScaleItems, judgeDesignItems, judgePermitItems, calcAreas, PERMITTED_USES } from "@/lib/judge";

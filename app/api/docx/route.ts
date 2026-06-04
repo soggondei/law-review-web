@@ -1,3 +1,4 @@
+export const preferredRegion = ["icn1"];
 import { NextRequest, NextResponse } from "next/server";
 import {
   Document, Packer, Paragraph, Table, TableRow, TableCell,
