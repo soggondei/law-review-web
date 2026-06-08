@@ -1,6 +1,6 @@
 export const preferredRegion = ["icn1"];
 import { NextRequest, NextResponse } from "next/server";
-import { fetchAddressInfo, fetchBuildingInfo, fetchLandUseInfo, fetchZoneRates, getOrdinanceRates } from "@/lib/api";
+import { fetchAddressInfo, fetchBuildingInfo, fetchLandUseInfo, fetchZoneRates, getOrdinanceRates, fetchCoordinates, fetchEducationZone } from "@/lib/api";
 import { judgeScaleItems, judgeDesignItems, judgePermitItems, calcAreas, PERMITTED_USES } from "@/lib/judge";
 import { generateSchedule } from "@/lib/schedule";
 import { analyzeRemodel } from "@/lib/remodel";
@@ -55,19 +55,26 @@ export async function POST(req: NextRequest) {
     const 지하층 = parseInt(String(지하층입력)) || 0;
     const 추정층수 = parseInt(층수입력) || areas?.추정층수 || 0;
     const 최대연면적 = areas?.최대연면적 ?? 0;
+    const 세대수 = parseInt(String(세대수입력)) || 0;
+
+    // 좌표·교육환경보호구역 (판단 전 선조회)
+    const coords = await fetchCoordinates(addrInfo.roadAddr ?? address).catch(() => null);
+    const educationZone = coords
+      ? await fetchEducationZone(coords.lng, coords.lat).catch(() => null)
+      : null;
 
     // 5대 분류 판단
-    const scaleItems  = judgeScaleItems({
+    const scaleItems = judgeScaleItems({
       대지면적: 대지면적_val, 연면적: 최대연면적, 층수: 추정층수,
       용도: 용도||"", 용도지역: zoneName||"", 기타지구: land.기타지구,
       건폐율: effectiveRule?.건폐율, 용적률: effectiveRule?.용적률,
       최대건축면적: areas?.최대건축면적, 최대연면적,
     });
-    const 세대수 = parseInt(String(세대수입력)) || 0;
     const designItems = judgeDesignItems({ 연면적: 최대연면적, 층수: 추정층수, 용도: 용도||"", 대지면적: 대지면적_val, 지하층, 세대수, 기타지구: land.기타지구 });
     const permitItems = judgePermitItems({
       연면적: 최대연면적, 층수: 추정층수, 용도: 용도||"",
       대지면적: 대지면적_val, 기타지구: land.기타지구, 시도: addrInfo.siNm||"", 지하층, 세대수,
+      교육환경구역: educationZone,
     });
 
     // 스케줄
@@ -94,6 +101,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       addrInfo, land, zoneName, bldgInfo,
+      coords, educationZone,
       effectiveRule, legalRates, areas,
       추정층수, 최대연면적, 지하층, 세대수,
       대지면적출처: bldgInfo?.대지면적 ? "건축물대장" : (parseFloat(body.면적) ? "직접입력" : luris면적 ? "LURIS(공시)" : "미확인"),
@@ -111,6 +119,7 @@ export async function POST(req: NextRequest) {
         siNm: addrInfo.siNm || "",
         zoneName,
         세대수,
+        교육환경구역: educationZone,
       },
     });
   } catch (e: any) {

@@ -4,14 +4,33 @@ import { NextRequest, NextResponse } from "next/server";
 const NOTION_TOKEN = process.env.NOTION_TOKEN!;
 const LAW_REVIEW_DB = "36f9ff7b-382c-81c2-ba5b-eff9aa2e2624";
 
+function classify용도(용도: string): string {
+  if (!용도) return "기타";
+  if (["단독주택","다가구주택","아파트","연립주택","다세대주택","기숙사","공동주택"].some(k => 용도.includes(k))) return "주거";
+  if (["근린생활시설","판매시설","숙박시설","위락시설","일반음식점","관광휴게시설"].some(k => 용도.includes(k))) return "상업";
+  if (["업무시설","오피스텔"].some(k => 용도.includes(k))) return "업무";
+  if (["공장","창고시설","위험물","지식산업센터"].some(k => 용도.includes(k))) return "공업";
+  if (["의료시설","교육연구시설","노유자시설"].some(k => 용도.includes(k))) return "의료·교육";
+  return "기타";
+}
+
+function classify규모(연면적: number | null): string {
+  if (!연면적) return "미상";
+  if (연면적 < 500) return "소규모 (500㎡ 미만)";
+  if (연면적 < 3000) return "중규모 (500-3000㎡)";
+  return "대규모 (3000㎡ 이상)";
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { addrInfo, zoneName, areas, effectiveRule, 용도, 행위, computed, address } = body;
+    const { addrInfo, zoneName, areas, effectiveRule, 용도, 행위, computed, address, folderName } = body;
 
     const today = new Date().toISOString().slice(0, 10);
     const 건폐율val = effectiveRule?.건폐율 ? effectiveRule.건폐율 / 100 : null;
     const 용적률val = effectiveRule?.용적률 ? effectiveRule.용적률 / 100 : null;
+    const 연면적val = computed?.areas?.최대연면적 ?? null;
+    const siNm: string = body.baseData?.siNm ?? "";
 
     const properties: Record<string, any> = {
       "검토명": { title: [{ text: { content: `법규검토 — ${addrInfo?.jibunAddr ?? address ?? ""}` } }] },
@@ -20,6 +39,12 @@ export async function POST(req: NextRequest) {
       "건물 용도": { rich_text: [{ text: { content: 용도 ?? "" } }] },
       "결론": { select: { name: "검토중" } },
     };
+
+    if (folderName) properties["프로젝트 폴더"] = { rich_text: [{ text: { content: folderName } }] };
+    if (행위) properties["행위 유형"] = { select: { name: 행위 } };
+    if (siNm) properties["지역"] = { select: { name: siNm } };
+    properties["용도 분류"] = { select: { name: classify용도(용도 ?? "") } };
+    if (연면적val) properties["규모"] = { select: { name: classify규모(연면적val) } };
 
     if (zoneName) properties["용도지역"] = { select: { name: zoneName } };
     if (areas?.대지면적) properties["대지면적 (㎡)"] = { number: areas.대지면적 };

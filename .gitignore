@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# tesseract.js language models (auto-downloaded at runtime)
+*.traineddata
+
+# test output
+/test-results

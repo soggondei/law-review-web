@@ -64,6 +64,53 @@ export async function fetchBuildingInfo(sigunguCd: string, bjdongCd: string, bun
   } catch { return null; }
 }
 
+// ── 좌표 조회 (VWORLD 지오코딩) ───────────────────────────────────────────────
+export async function fetchCoordinates(address: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const url = `https://api.vworld.kr/req/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&address=${encodeURIComponent(address)}&refine=false&format=json&type=road&key=${LURIS_KEY}`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    const pt   = data?.response?.result?.point;
+    if (!pt) return null;
+    return { lat: parseFloat(pt.y), lng: parseFloat(pt.x) };
+  } catch { return null; }
+}
+
+// ── 교육환경보호구역 (VWORLD req/data — LT_C_UQ111) ──────────────────────────
+export async function fetchEducationZone(lng: number, lat: number): Promise<{
+  구역명: string; 시도: string; 시군구: string;
+} | null> {
+  try {
+    // geomFilter: WKT POINT 형식, EPSG:4326 (경도 위도 순서)
+    const params = new URLSearchParams({
+      service:    "data",
+      request:    "GetFeature",
+      data:       "LT_C_UQ111",
+      key:        LURIS_KEY,
+      geomFilter: `POINT(${lng} ${lat})`,
+      crs:        "EPSG:4326",
+      geometry:   "false",
+      size:       "10",
+      format:     "json",
+    });
+    const res  = await fetch(`https://api.vworld.kr/req/data?${params}`);
+    const body = await res.json();
+    if (body?.response?.status !== "OK") return null;
+    const features = body?.response?.result?.featureCollection?.features;
+    if (!features?.length) return null;
+    // 절대정화구역 우선, 없으면 상대정화구역
+    const 절대 = features.find((f: any) => f.properties?.uname?.includes("절대"));
+    const hit  = 절대 ?? features[0];
+    const 구역명 = hit.properties?.uname?.trim();
+    if (!구역명) return null;   // uname 없으면 실제 구역 미해당
+    return {
+      구역명,
+      시도:   hit.properties?.sido_name ?? "",
+      시군구: hit.properties?.sigg_name ?? "",
+    };
+  } catch { return null; }
+}
+
 // ── LURIS 용도지역 ────────────────────────────────────────────────────────────
 export async function fetchLandUseInfo(pnu: string) {
   let page = 1;

@@ -1,8 +1,30 @@
 "use client";
 
 import { useState, useRef, useCallback, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { judgeScaleItems, judgeDesignItems, judgePermitItems, calcAreas, calcParking } from "@/lib/judge";
 import { generateSchedule } from "@/lib/schedule";
+import type { PdfExtractResult } from "@/app/api/pdf-extract/route";
+
+const BuildingViewer3D = dynamic(() => import("@/components/BuildingViewer3D"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full rounded-xl bg-gray-100 flex items-center justify-center" style={{ height: 360 }}>
+      <span className="text-[12px] text-gray-400 animate-pulse">3D 모델 로딩 중...</span>
+    </div>
+  ),
+});
+
+const LandUseMap = dynamic(() => import("@/components/LandUseMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full rounded-lg bg-gray-100 flex items-center justify-center border border-gray-200" style={{ height: 320 }}>
+      <span className="text-[12px] text-gray-400 animate-pulse">지도 로딩 중...</span>
+    </div>
+  ),
+});
+
+const PdfExtractPanel = dynamic(() => import("@/components/PdfExtractPanel"), { ssr: false });
 
 type Item = { category: string; 항목: string; 법령: string; 내용: string; 해당여부: string; 설계기준?: string; };
 
@@ -54,6 +76,23 @@ function Accordion({ title, badge, children }: { title: string; badge?: string; 
       {open && <div className="px-4 pb-4">{children}</div>}
     </div>
   );
+}
+
+function classify용도(용도: string): string {
+  if (!용도) return "기타";
+  if (["단독주택","다가구주택","아파트","연립주택","다세대주택","기숙사","공동주택"].some(k => 용도.includes(k))) return "주거";
+  if (["근린생활시설","판매시설","숙박시설","위락시설","일반음식점","관광휴게시설"].some(k => 용도.includes(k))) return "상업";
+  if (["업무시설","오피스텔"].some(k => 용도.includes(k))) return "업무";
+  if (["공장","창고시설","위험물","지식산업센터"].some(k => 용도.includes(k))) return "공업";
+  if (["의료시설","교육연구시설","노유자시설"].some(k => 용도.includes(k))) return "의료·교육";
+  return "기타";
+}
+
+function classify규모(연면적: number | null): string {
+  if (!연면적) return "미상";
+  if (연면적 < 500) return "소규모";
+  if (연면적 < 3000) return "중규모";
+  return "대규모";
 }
 
 function getLawUrl(법령: string): string | null {
@@ -177,6 +216,19 @@ function ScheduleTable({ items, total }: { items: any[]; total: number }) {
   );
 }
 
+// 점-다각형 내부 판정 (ray-casting)
+function pipTest(pt: [number, number], poly: [number, number][]): boolean {
+  const [px, py] = pt;
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 export default function Home() {
   const [address, setAddress] = useState("");
   const [용도목록, set용도목록] = useState<string[]>([]);
@@ -197,10 +249,16 @@ export default function Home() {
   const [editParams, setEditParams] = useState({ 층수: 0, 대지면적: 0, 건축면적입력: 0, 연면적입력: 0, 지하층: 0, 필로티: false, 높이: 0, 구조: "RC" });
   const [notionSaving, setNotionSaving] = useState(false);
   const [notionUrl, setNotionUrl] = useState<string | null>(null);
+  const [showFolderPanel, setShowFolderPanel] = useState(false);
+  const [folderName, setFolderName] = useState("");
   const [inputStep, setInputStep] = useState<1|2>(1);
   const [용도별면적, set용도별면적] = useState<Record<string, number>>({});
   const [lawCheck, setLawCheck] = useState<{ laws: {name:string; amendDate:string|null; recent:boolean}[]; checkedAt:string; recentCount:number } | null>(null);
   const [lawCheckLoading, setLawCheckLoading] = useState(false);
+  const [parcelData, setParcelData] = useState<{ localCoords: [number,number][]; bboxAspect: number } | null>(null);
+  const [surroundings, setSurroundings] = useState<import("@/components/BuildingViewer3D").SurroundingContext | null>(null);
+  const [siteFromOSM, setSiteFromOSM] = useState(false); // 대지 형상을 OSM에서 가져왔는지 여부
+  const [pdfFloors, setPdfFloors] = useState<PdfExtractResult | null>(null);
 
   const filteredUseGroups = USE_LIST.map(g => ({
     group: g.group,
@@ -242,7 +300,7 @@ export default function Home() {
       세대수: apiResult.baseData?.세대수 ?? 0,
     });
     const designItems = judgeDesignItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 기타지구, 높이: editParams.높이 || undefined, 구조: editParams.구조 });
-    const permitItems = judgePermitItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 기타지구, 시도: siNm, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0 });
+    const permitItems = judgePermitItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 기타지구, 시도: siNm, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 교육환경구역: apiResult.baseData?.교육환경구역 ?? null });
     const { schedule: scheduleItems, totalMonths: scheduleTotalMonths } = generateSchedule({
       용도: apiResult.용도 || "", 연면적: 계획연면적, 층수, 대지면적,
       지하굴착깊이: 지하층 * 4, 기타지구, 시도: siNm,
@@ -299,6 +357,46 @@ export default function Home() {
         높이: 0,
         구조: "RC",
       });
+      // 필지 폴리곤 비동기 조회
+      setParcelData(null);
+      setSiteFromOSM(false);
+      if (data.addrInfo?.pnu) {
+        fetch(`/api/parcel?pnu=${data.addrInfo.pnu}`)
+          .then(r => r.json())
+          .then(d => { if (!d.error) setParcelData(d); })
+          .catch(() => {});
+      }
+      // 주변 건물·도로 컨텍스트 비동기 조회 (OSM)
+      setSurroundings(null);
+      setSiteFromOSM(false);
+      if (data.coords?.lat && data.coords?.lng) {
+        fetch(`/api/context?lat=${data.coords.lat}&lng=${data.coords.lng}`)
+          .then(r => r.json())
+          .then(d => {
+            if (d.error) return;
+            // ── 대지 형상: 조회 좌표를 포함하는 건물 폴리곤을 찾아 사용
+            const siteBldg = d.buildings.find((b: { coords: [number,number][] }) =>
+              pipTest([0, 0], b.coords)
+            );
+            if (siteBldg) {
+              const cx = siteBldg.coords.reduce((s: number, p: [number,number]) => s + p[0], 0) / siteBldg.coords.length;
+              const cy = siteBldg.coords.reduce((s: number, p: [number,number]) => s + p[1], 0) / siteBldg.coords.length;
+              const centered: [number,number][] = siteBldg.coords.map(([x, y]: [number,number]) => [x - cx, y - cy]);
+              const xs = centered.map((p: [number,number]) => p[0]);
+              const ys = centered.map((p: [number,number]) => p[1]);
+              setParcelData({
+                localCoords: centered,
+                bboxAspect: (Math.max(...xs) - Math.min(...xs)) / Math.max(Math.max(...ys) - Math.min(...ys), 0.1),
+              });
+              setSiteFromOSM(true);
+              // 대지 건물은 주변 건물 목록에서 제외
+              setSurroundings({ ...d, buildings: d.buildings.filter((b: unknown) => b !== siteBldg) });
+            } else {
+              setSurroundings(d);
+            }
+          })
+          .catch(() => {});
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -306,13 +404,26 @@ export default function Home() {
     }
   }
 
-  async function handleNotionSave() {
+  function openFolderPanel() {
+    if (!apiResult || !computed) return;
+    const 구군 = apiResult.addrInfo?.sggNm ?? apiResult.baseData?.siNm ?? "";
+    const 주용도 = 용도목록[0] ?? 용도 ?? "";
+    if (!folderName) setFolderName([구군, 행위, 주용도].filter(Boolean).join(" "));
+    setShowFolderPanel(true);
+  }
+
+  async function handleNotionSave(folder: string) {
     if (!apiResult || !computed) return;
     setNotionSaving(true);
+    setShowFolderPanel(false);
     try {
+      if (!localStorage.getItem("notionSetupDone")) {
+        await fetch("/api/notion/setup", { method: "POST" });
+        localStorage.setItem("notionSetupDone", "1");
+      }
       const res = await fetch("/api/notion", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...apiResult, computed, address }),
+        body: JSON.stringify({ ...apiResult, computed, address, folderName: folder }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "저장 실패");
@@ -813,6 +924,104 @@ export default function Home() {
           })()}
 
           <div className="mt-4 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
+            <Accordion title="3D 법적 볼륨" badge={computed.areas ? `${editParams.층수}층 · 건축면적 ${computed.areas.최대건축면적}㎡` : ""}>
+              {(() => {
+                const 건축면적 = computed.areas?.최대건축면적 ?? 0;
+                const 대지면적 = editParams.대지면적;
+                const 층수 = Math.max(editParams.층수, 1);
+                // parcel 없으면 대지면적 기반 정사각형으로 폴백
+                const s = Math.sqrt(대지면적) / 2;
+                const fallbackCoords: [number, number][] = [[-s, -s], [s, -s], [s, s], [-s, s]];
+                const coords = parcelData?.localCoords ?? fallbackCoords;
+                const aspect = parcelData?.bboxAspect ?? 1.0;
+                return (
+                  <div className="mt-2">
+                    <BuildingViewer3D
+                      localCoords={coords}
+                      건축면적={건축면적}
+                      층수={층수}
+                      대지면적={대지면적}
+                      bboxAspect={aspect}
+                      surroundings={surroundings ?? undefined}
+                      zoneName={r.baseData?.zoneName ?? r.zoneName ?? undefined}
+                      lat={r.coords?.lat}
+                      lng={r.coords?.lng}
+                    />
+                    <div className="flex items-center justify-between mt-1.5">
+                      <p className="text-[10px] text-gray-400">
+                        {surroundings
+                          ? `주변 건물 ${surroundings.buildings.length}동 · 도로 ${surroundings.roads.length}개 반영`
+                          : "주변 현황 불러오는 중…"}
+                      </p>
+                      <p className={`text-[10px] ${siteFromOSM ? "text-green-600" : "text-amber-500"}`}>
+                        대지 형상: {siteFromOSM ? "OSM 건물 윤곽 사용" : "면적 기반 추정 (폴백)"}
+                      </p>
+                    </div>
+                    <div className="mt-2 grid grid-cols-4 gap-1.5">
+                      {[
+                        { label: "대지면적", value: `${대지면적.toLocaleString()}㎡` },
+                        { label: "건축면적", value: `${건축면적.toLocaleString()}㎡` },
+                        { label: "최대연면적", value: computed.areas ? `${computed.areas.최대연면적.toLocaleString()}㎡` : "—" },
+                        { label: `${층수}층 높이`, value: `${(층수 * 3.3).toFixed(1)}m` },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="bg-blue-50 rounded-lg p-2 text-center">
+                          <div className="text-[10px] text-blue-500">{label}</div>
+                          <div className="text-[12px] font-bold text-blue-700">{value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* PDF 도면 면적 추출 */}
+                    <PdfExtractPanel
+                      onApply={(res) => {
+                        setPdfFloors(res);
+                        if (res.지상층수) setEditParams(p => ({ ...p, 층수: res.지상층수! }));
+                        if (res.대지면적)  setEditParams(p => ({ ...p, 대지면적: res.대지면적! }));
+                        if (res.건축면적)  setEditParams(p => ({ ...p, 건축면적입력: res.건축면적! }));
+                      }}
+                    />
+
+                    {/* PDF 층별 면적 결과 표시 */}
+                    {pdfFloors && pdfFloors.floors.length > 0 && (
+                      <div className="mt-3 rounded-xl border border-green-200 bg-green-50 overflow-hidden">
+                        <div className="px-3 py-2 bg-green-700 text-white text-[11px] font-bold flex items-center justify-between">
+                          <span>PDF 추출 — 층별 면적표</span>
+                          <button onClick={() => setPdfFloors(null)} className="text-green-200 hover:text-white text-[13px] leading-none">×</button>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-[12px]">
+                            <thead>
+                              <tr className="bg-green-100">
+                                <th className="px-3 py-1.5 text-left text-green-800">층</th>
+                                <th className="px-3 py-1.5 text-right text-green-800">전용 (㎡)</th>
+                                <th className="px-3 py-1.5 text-right text-green-800">공용 (㎡)</th>
+                                <th className="px-3 py-1.5 text-right text-green-800">계 (㎡)</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {pdfFloors.floors.map((f, i) => (
+                                <tr key={f.층} className={i % 2 === 0 ? "bg-white" : "bg-green-50/60"}>
+                                  <td className="px-3 py-1.5 font-medium text-gray-700">{f.층}</td>
+                                  <td className="px-3 py-1.5 text-right">{f.전용면적?.toFixed(2) ?? "—"}</td>
+                                  <td className="px-3 py-1.5 text-right">{(f.공용면적 ?? 0) > 0 ? f.공용면적?.toFixed(2) : "—"}</td>
+                                  <td className="px-3 py-1.5 text-right font-semibold text-green-700">{f.중면적?.toFixed(2) ?? "—"}</td>
+                                </tr>
+                              ))}
+                              <tr className="bg-green-100 border-t border-green-200 font-bold text-green-800">
+                                <td className="px-3 py-1.5">합계</td>
+                                <td className="px-3 py-1.5 text-right">{pdfFloors.floors.reduce((s,f) => s+(f.전용면적??0),0).toFixed(2)}</td>
+                                <td className="px-3 py-1.5 text-right">{pdfFloors.floors.reduce((s,f) => s+(f.공용면적??0),0).toFixed(2)}</td>
+                                <td className="px-3 py-1.5 text-right">{pdfFloors.floors.reduce((s,f) => s+(f.중면적??0),0).toFixed(2)}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </Accordion>
             <Accordion title="기본 대지 정보">
               <div className="rounded-lg border border-gray-200 overflow-hidden mt-2">
                 <table className="w-full text-[13px]">
@@ -822,6 +1031,7 @@ export default function Home() {
                       ["대지위치 (도로명)", r.addrInfo?.roadAddr],
                       ["용도지역", r.zoneName ?? "확인 필요"],
                       ["기타지구", r.land?.기타지구?.join(", ") || "없음"],
+                      ["교육환경보호구역", r.educationZone ? `⚠️ ${r.educationZone.구역명} (${r.educationZone.시군구})` : "해당 없음"],
                       ["대지면적", `${editParams.대지면적}㎡${editParams.대지면적 !== r.baseData?.대지면적 ? " (수정됨)" : ""}${r.대지면적출처 && r.대지면적출처 !== "건축물대장" ? ` — 출처: ${r.대지면적출처}` : ""}`],
                       ["기존건물", r.bldgInfo?.층수 ? `지상${r.bldgInfo.층수}층 / ${r.bldgInfo.주용도} / ${r.bldgInfo.연면적}㎡` : "미등록"],
                       ["검토용도", r.용도 || "미지정"],
@@ -835,6 +1045,42 @@ export default function Home() {
                   </tbody>
                 </table>
               </div>
+              {/* 토지이용계획도 */}
+              {r.coords && (
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-bold text-gray-600">토지이용계획도</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] text-gray-400">스크롤: 줌 · 드래그: 이동</span>
+                      <a
+                        href={`https://www.eum.go.kr/web/am/amMain.jsp`}
+                        target="_blank" rel="noreferrer"
+                        className="text-[10px] text-blue-500 hover:underline"
+                      >토지이음 전체보기 →</a>
+                    </div>
+                  </div>
+                  <LandUseMap
+                    lat={r.coords.lat}
+                    lng={r.coords.lng}
+                    zoneName={r.baseData?.zoneName ?? r.zoneName}
+                  />
+                  <div className="flex gap-3 mt-1.5 flex-wrap items-center">
+                    {[
+                      { color: "bg-[#FFFF99]", label: "전용주거" },
+                      { color: "bg-[#FFCC66]", label: "일반주거" },
+                      { color: "bg-[#FF66CC]", label: "준주거·상업" },
+                      { color: "bg-[#CCCCCC]", label: "공업" },
+                      { color: "bg-[#99CC66]", label: "녹지" },
+                    ].map(({ color, label }) => (
+                      <div key={label} className="flex items-center gap-1">
+                        <div className={`w-3 h-3 rounded-sm border border-gray-300 ${color}`} />
+                        <span className="text-[10px] text-gray-500">{label}</span>
+                      </div>
+                    ))}
+                    <span className="text-[10px] text-gray-400 ml-1">· 빨간 원: 학교환경보호구역</span>
+                  </div>
+                </div>
+              )}
             </Accordion>
 
             <Accordion title="1. 용도 / 행위">
@@ -1113,11 +1359,40 @@ export default function Home() {
             </Accordion>
 
             <div className="px-4 py-4 bg-gray-50 border-t border-gray-100 space-y-2">
+              {showFolderPanel && r && computed && (
+                <div className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3 mb-1">
+                  <div className="text-[13px] font-semibold text-gray-700">Notion 저장 — 폴더 분류</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {행위 && <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{행위}</span>}
+                    {r.baseData?.siNm && <span className="text-[11px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">{r.baseData.siNm}</span>}
+                    {용도 && <span className="text-[11px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">{classify용도(용도)}</span>}
+                    {computed.areas?.최대연면적 && <span className="text-[11px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">{classify규모(computed.areas.최대연면적)}</span>}
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-gray-500 mb-1 block">프로젝트 폴더명</label>
+                    <input
+                      value={folderName}
+                      onChange={e => setFolderName(e.target.value)}
+                      placeholder="예: 강남구 신축 아파트 프로젝트"
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] text-gray-900 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                    <div className="text-[10px] text-gray-400 mt-1">Notion DB에서 이 값으로 필터링하여 폴더처럼 관리합니다</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setShowFolderPanel(false)}
+                      className="flex-1 py-2 bg-gray-100 text-gray-600 rounded-xl text-[13px] font-medium hover:bg-gray-200">취소</button>
+                    <button onClick={() => handleNotionSave(folderName)} disabled={notionSaving}
+                      className="flex-1 py-2 bg-black text-white rounded-xl text-[13px] font-semibold hover:bg-gray-800 disabled:opacity-60">
+                      {notionSaving ? "저장 중…" : "저장"}
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="flex gap-2">
                 <button onClick={handleDownload} className="flex-1 bg-[#1F4E79] text-white py-2.5 rounded-xl font-semibold text-[13px] hover:bg-[#1a3f63]">
                   📄 DOCX
                 </button>
-                <button onClick={handleNotionSave} disabled={notionSaving}
+                <button onClick={openFolderPanel} disabled={notionSaving}
                   className="flex-1 bg-black text-white py-2.5 rounded-xl font-semibold text-[13px] hover:bg-gray-800 disabled:opacity-60">
                   {notionSaving ? "저장 중…" : "🗒 Notion 저장"}
                 </button>
@@ -1125,7 +1400,7 @@ export default function Home() {
                   className="px-4 py-2.5 bg-gray-200 text-gray-700 rounded-xl text-[13px] font-medium hover:bg-gray-300">
                   🖨 인쇄
                 </button>
-                <button onClick={() => { setApiResult(null); setNotionUrl(null); setAddress(""); set용도목록([]); set용도입력(""); set용도별면적({}); setInputStep(1); setLawCheck(null); }}
+                <button onClick={() => { setApiResult(null); setNotionUrl(null); setAddress(""); set용도목록([]); set용도입력(""); set용도별면적({}); setInputStep(1); setLawCheck(null); setShowFolderPanel(false); setFolderName(""); setParcelData(null); setSurroundings(null); setSiteFromOSM(false); }}
                   className="px-3 py-2.5 bg-gray-100 text-gray-500 rounded-xl text-[13px] hover:bg-gray-200">
                   초기화
                 </button>
