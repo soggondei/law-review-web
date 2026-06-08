@@ -474,48 +474,45 @@ export default function Home() {
   const r = apiResult;
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10 shadow-sm">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+
+      {/* ── 헤더 ── */}
+      <header className="sticky top-0 z-20 bg-white border-b border-gray-200 px-4 flex items-center justify-between shadow-sm h-14 shrink-0">
         <div>
-          <h1 className="text-[16px] font-bold text-[#1F4E79]">건축 법규검토</h1>
-          <p className="text-[11px] text-gray-400">자동화 분석 시스템</p>
+          <h1 className="text-[15px] font-bold text-[#1F4E79]">건축 법규검토</h1>
+          <p className="text-[10px] text-gray-400">자동화 분석 시스템</p>
         </div>
-        {r && (
-          <button onClick={handleDownload} className="bg-[#2E75B6] text-white text-[12px] px-3 py-1.5 rounded-lg font-medium">
-            📄 DOCX
-          </button>
-        )}
-      </div>
-
-      {r && computed && (
-        <div className="grid grid-cols-2 gap-px bg-gray-200 border-b border-gray-200">
-          {[
-            { label: "용도지역", value: r.zoneName ?? "미확인", color: "text-blue-700" },
-            { label: (editParams.건축면적입력 > 0 || editParams.연면적입력 > 0) ? "계획연면적" : "최대연면적", value: (editParams.건축면적입력 > 0 || editParams.연면적입력 > 0) ? `${computed.계획연면적.toLocaleString()}㎡` : (computed.areas?.최대연면적 ? `${computed.areas.최대연면적.toLocaleString()}㎡` : "—"), color: "text-indigo-700" },
-            { label: "최대건축면적", value: computed.areas?.최대건축면적 ? `${computed.areas.최대건축면적}㎡` : "—", color: "text-purple-700" },
-            { label: "지상/지하", value: `${editParams.층수}층 / B${editParams.지하층}`, color: "text-teal-700" },
-          ].map(({ label, value, color }) => (
-            <div key={label} className="bg-white px-4 py-3">
-              <div className="text-[11px] text-gray-400 mb-0.5">{label}</div>
-              <div className={`text-[16px] font-bold ${color}`}>{value}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="max-w-2xl mx-auto px-4">
-        <div className="bg-white mt-4 rounded-2xl shadow-sm border border-gray-100 p-4 space-y-3">
-          <h2 className="text-[14px] font-semibold text-gray-700">01. 사업 개요</h2>
-          {/* 단계 표시 */}
+        {r && computed && (
           <div className="flex items-center gap-2">
-            <div className={`flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full transition-colors ${inputStep === 1 ? "bg-[#1F4E79] text-white" : "bg-green-100 text-green-700"}`}>
-              <span>{inputStep > 1 ? "✓" : "1"}</span><span className="ml-0.5">기본 정보</span>
-            </div>
-            <div className="flex-1 h-px bg-gray-200" />
-            <div className={`flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full transition-colors ${inputStep === 2 ? "bg-[#1F4E79] text-white" : "bg-gray-100 text-gray-400"}`}>
-              <span>2</span><span className="ml-0.5">상세 설정</span>
-            </div>
+            <button onClick={handleDownload} className="bg-[#2E75B6] text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-[#1F4E79] transition-colors">📄 DOCX</button>
+            <button onClick={openFolderPanel} disabled={notionSaving} className="bg-black text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-gray-800 disabled:opacity-60 transition-colors">
+              {notionSaving ? "저장 중…" : "🗒 Notion"}
+            </button>
+            <button onClick={() => window.print()} className="bg-gray-100 text-gray-600 text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-gray-200 transition-colors">🖨</button>
           </div>
+        )}
+      </header>
+
+      {/* ── 2열 본문 ── */}
+      <div className="flex flex-1">
+
+      {/* ──────────────── 사이드바 ──────────────── */}
+      <aside className="w-72 shrink-0 sticky top-14 self-start h-[calc(100vh-56px)] bg-white border-r border-gray-200 flex flex-col overflow-hidden">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
+          {/* ── 사업 개요 입력 ── */}
+          <div>
+            <h2 className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-3">사업 개요</h2>
+            {/* 단계 표시 */}
+            <div className="flex items-center gap-2 mb-3">
+              <div className={`flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full transition-colors ${inputStep === 1 ? "bg-[#1F4E79] text-white" : "bg-green-100 text-green-700"}`}>
+                <span>{inputStep > 1 ? "✓" : "1"}</span><span className="ml-0.5">기본 정보</span>
+              </div>
+              <div className="flex-1 h-px bg-gray-200" />
+              <div className={`flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full transition-colors ${inputStep === 2 ? "bg-[#1F4E79] text-white" : "bg-gray-100 text-gray-400"}`}>
+                <span>2</span><span className="ml-0.5">상세 설정</span>
+              </div>
+            </div>
 
           {/* ── STEP 1: 기본 정보 ── */}
           {inputStep === 1 && <>
@@ -758,147 +755,198 @@ export default function Home() {
             </div>
           )}
 
-          {error && <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-[13px] text-red-600">{error}</div>}
+          {error && <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-[12px] text-red-600">{error}</div>}
           <div className="flex gap-2">
-            <button onClick={() => setInputStep(1)}
-              className="px-4 py-3 bg-gray-100 text-gray-600 rounded-xl font-medium text-[14px] hover:bg-gray-200 transition-colors">
-              ← 이전
-            </button>
+            <button onClick={() => setInputStep(1)} className="px-3 py-2.5 bg-gray-100 text-gray-600 rounded-xl font-medium text-[13px] hover:bg-gray-200 transition-colors">← 이전</button>
             <button onClick={handleAnalyze} disabled={loading}
-              className="flex-1 bg-[#1F4E79] text-white py-3 rounded-xl font-semibold text-[15px] hover:bg-[#1a3f63] transition-colors disabled:opacity-60">
+              className="flex-1 bg-[#1F4E79] text-white py-2.5 rounded-xl font-semibold text-[13px] hover:bg-[#1a3f63] transition-colors disabled:opacity-60">
               {loading ? "분석 중..." : "법규검토 시작"}
             </button>
           </div>
           </>}
-        </div>
+          </div>{/* end 사업 개요 입력 */}
 
-        {loading && (
-          <div className="text-center py-12">
-            <div className="inline-block w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
-            <p className="text-[13px] text-gray-500">주소 검증 → 용도지역 조회 → 법규 분석 중...</p>
-          </div>
-        )}
-
-        {r && computed && (
-          <>
-          {/* 실시간 수치 편집 바 */}
-          <div className="mt-3 bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3">
-            <div className="text-[11px] font-bold text-blue-700 mb-2">수치 조정 — 변경 즉시 법규 재계산</div>
-            <div className="flex flex-wrap gap-4 items-end">
-              <div>
-                <div className="text-[10px] text-gray-500 mb-1">지상층수</div>
-                <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden bg-white">
-                  <button onClick={() => setEditParams(p => ({ ...p, 층수: Math.max(1, p.층수 - 1) }))}
-                    className="px-2 py-1.5 text-gray-600 hover:bg-gray-100 text-[14px]">−</button>
-                  <span className="px-2 py-1.5 text-[13px] font-semibold text-gray-900 min-w-[36px] text-center">{editParams.층수}층</span>
-                  <button onClick={() => setEditParams(p => ({ ...p, 층수: p.층수 + 1 }))}
-                    className="px-2 py-1.5 text-gray-600 hover:bg-gray-100 text-[14px]">+</button>
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] text-gray-500 mb-1">지하층수</div>
-                <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden bg-white">
-                  <button onClick={() => setEditParams(p => ({ ...p, 지하층: Math.max(0, p.지하층 - 1) }))}
-                    className="px-2 py-1.5 text-gray-600 hover:bg-gray-100 text-[14px]">−</button>
-                  <span className="px-2 py-1.5 text-[13px] font-semibold text-gray-900 min-w-[36px] text-center">
-                    {editParams.지하층 === 0 ? "없음" : `B${editParams.지하층}`}
-                  </span>
-                  <button onClick={() => setEditParams(p => ({ ...p, 지하층: Math.min(5, p.지하층 + 1) }))}
-                    className="px-2 py-1.5 text-gray-600 hover:bg-gray-100 text-[14px]">+</button>
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] text-gray-500 mb-1">대지면적 (㎡)</div>
-                <input type="number" value={editParams.대지면적 || ""}
-                  onChange={e => setEditParams(p => ({ ...p, 대지면적: parseFloat(e.target.value) || 0 }))}
-                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-[13px] text-gray-900 w-24 bg-white focus:outline-none focus:border-blue-400" />
-              </div>
-              <div>
-                <div className="text-[10px] text-gray-500 mb-1">건축면적 (㎡)</div>
-                <input type="number" value={editParams.건축면적입력 || ""}
-                  onChange={e => setEditParams(p => ({ ...p, 건축면적입력: parseFloat(e.target.value) || 0 }))}
-                  placeholder="최대"
-                  className={`border rounded-lg px-2 py-1.5 text-[13px] text-gray-900 w-24 bg-white focus:outline-none focus:border-blue-400 ${computed.건폐율초과 ? "border-red-400 bg-red-50" : "border-gray-300"}`} />
-                {computed.건폐율초과 && <div className="text-[10px] text-red-500 mt-0.5">최대 {computed.areas?.최대건축면적}㎡ 초과</div>}
-              </div>
-              <div>
-                <div className="text-[10px] text-gray-500 mb-1">연면적 (㎡)</div>
-                <input type="number" value={editParams.연면적입력 || ""}
-                  onChange={e => setEditParams(p => ({ ...p, 연면적입력: parseFloat(e.target.value) || 0 }))}
-                  placeholder="최대"
-                  className={`border rounded-lg px-2 py-1.5 text-[13px] text-gray-900 w-24 bg-white focus:outline-none focus:border-blue-400 ${computed.용적률초과 ? "border-red-400 bg-red-50" : "border-gray-300"}`} />
-                {computed.용적률초과 && <div className="text-[10px] text-red-500 mt-0.5">최대 {computed.areas?.최대연면적?.toLocaleString()}㎡ 초과</div>}
-              </div>
-              <div>
-                <div className="text-[10px] text-gray-500 mb-1">필로티 1층</div>
-                <button onClick={() => setEditParams(p => ({ ...p, 필로티: !p.필로티 }))}
-                  className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${editParams.필로티 ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-300"}`}>
-                  {editParams.필로티 ? "적용 중" : "미적용"}
-                </button>
-              </div>
-              <div>
-                <div className="text-[10px] text-gray-500 mb-1">건축물 높이 (m)</div>
-                <input type="number" value={editParams.높이 || ""}
-                  onChange={e => setEditParams(p => ({ ...p, 높이: parseFloat(e.target.value) || 0 }))}
-                  placeholder="추정"
-                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-[13px] text-gray-900 w-20 bg-white focus:outline-none focus:border-blue-400" />
-              </div>
-              <div>
-                <div className="text-[10px] text-gray-500 mb-1">구조</div>
-                <select value={editParams.구조}
-                  onChange={e => setEditParams(p => ({ ...p, 구조: e.target.value }))}
-                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-[13px] text-gray-900 bg-white focus:outline-none focus:border-blue-400">
-                  {["RC", "철골", "목조", "조적"].map(v => <option key={v}>{v}</option>)}
-                </select>
-              </div>
-              {(editParams.층수 !== r.추정층수 || editParams.대지면적 !== r.baseData?.대지면적 || editParams.건축면적입력 > 0 || editParams.연면적입력 > 0 || editParams.지하층 !== r.지하층 || editParams.필로티 || editParams.높이 > 0 || editParams.구조 !== "RC") && (
-                <button onClick={() => setEditParams({ 층수: r.추정층수 || 0, 대지면적: r.baseData?.대지면적 || 0, 건축면적입력: 0, 연면적입력: 0, 지하층: r.지하층 || 0, 필로티: false, 높이: 0, 구조: "RC" })}
-                  className="text-[11px] text-gray-400 hover:text-gray-600 underline self-end pb-1.5">초기화</button>
-              )}
+          {/* ── 분석 결과 요약 (사이드바 — 분석 완료 후) ── */}
+          {r && computed && (<>
+            {/* 주소·용도 요약 */}
+            <div className="bg-blue-50 rounded-xl px-3 py-2.5">
+              <div className="text-[12px] font-bold text-blue-800 truncate">{address}</div>
+              <div className="text-[11px] text-blue-600 mt-0.5">{용도 || "용도 미지정"} · {행위}</div>
+              <button onClick={() => { setApiResult(null); setInputStep(1); setPdfFloors(null); setParcelData(null); setSurroundings(null); setSiteFromOSM(false); setLawCheck(null); setNotionUrl(null); }}
+                className="text-[10px] text-blue-400 hover:text-blue-600 underline mt-1">재검토</button>
             </div>
-          </div>
 
-          {/* ── 복합용도 면적 배분 패널 (1차 검토 후 표시) ── */}
-          {용도목록.length > 1 && (
-            <div className="mt-3 bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <span className="text-[11px] font-bold text-blue-700">복합용도 면적 배분</span>
-                  <span className="ml-2 text-[10px] text-blue-500">— 용도별 면적 입력 시 주차 대수를 정확하게 재산정합니다</span>
+            {/* 4개 KPI */}
+            <div className="grid grid-cols-2 gap-1.5">
+              {[
+                { label: "용도지역", value: r.zoneName ?? "미확인", color: "text-blue-700" },
+                { label: (editParams.건축면적입력 > 0 || editParams.연면적입력 > 0) ? "계획연면적" : "최대연면적", value: (editParams.건축면적입력 > 0 || editParams.연면적입력 > 0) ? `${computed.계획연면적.toLocaleString()}㎡` : (computed.areas?.최대연면적 ? `${computed.areas.최대연면적.toLocaleString()}㎡` : "—"), color: "text-indigo-700" },
+                { label: "최대건축면적", value: computed.areas?.최대건축면적 ? `${computed.areas.최대건축면적}㎡` : "—", color: "text-purple-700" },
+                { label: "지상/지하", value: `${editParams.층수}층 / B${editParams.지하층}`, color: "text-teal-700" },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-2">
+                  <div className="text-[9px] text-gray-400 mb-0.5">{label}</div>
+                  <div className={`text-[13px] font-bold ${color} leading-tight`}>{value}</div>
                 </div>
-                {Object.values(용도별면적).some(v => v > 0) && (
-                  <button onClick={() => set용도별면적({})}
-                    className="text-[11px] text-gray-400 hover:text-gray-600 underline">초기화</button>
+              ))}
+            </div>
+
+            {/* 수치 조정 */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[11px] font-bold text-gray-600">수치 조정</div>
+                {(editParams.층수 !== r.추정층수 || editParams.대지면적 !== r.baseData?.대지면적 || editParams.건축면적입력 > 0 || editParams.연면적입력 > 0 || editParams.지하층 !== r.지하층 || editParams.필로티 || editParams.높이 > 0 || editParams.구조 !== "RC") && (
+                  <button onClick={() => setEditParams({ 층수: r.추정층수 || 0, 대지면적: r.baseData?.대지면적 || 0, 건축면적입력: 0, 연면적입력: 0, 지하층: r.지하층 || 0, 필로티: false, 높이: 0, 구조: "RC" })}
+                    className="text-[10px] text-gray-400 hover:text-gray-600 underline">초기화</button>
                 )}
               </div>
-              <div className="flex flex-wrap gap-3 items-end">
-                {용도목록.map(u => (
-                  <div key={u}>
-                    <div className="text-[10px] text-gray-500 mb-1 truncate max-w-[120px]">{u}</div>
-                    <div className="flex items-center gap-1">
-                      <input type="number" value={용도별면적[u] || ""}
-                        onChange={e => set용도별면적(p => ({ ...p, [u]: parseFloat(e.target.value) || 0 }))}
-                        placeholder="면적"
-                        className="border border-gray-300 rounded-lg px-2 py-1.5 text-[13px] text-gray-900 w-20 bg-white focus:outline-none focus:border-blue-400" />
-                      <span className="text-[11px] text-gray-400">㎡</span>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-gray-500">지상층수</span>
+                  <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white">
+                    <button onClick={() => setEditParams(p => ({ ...p, 층수: Math.max(1, p.층수 - 1) }))} className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-[13px]">−</button>
+                    <span className="px-2.5 py-1 text-[12px] font-semibold text-gray-900 min-w-[36px] text-center">{editParams.층수}층</span>
+                    <button onClick={() => setEditParams(p => ({ ...p, 층수: p.층수 + 1 }))} className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-[13px]">+</button>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-gray-500">지하층수</span>
+                  <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white">
+                    <button onClick={() => setEditParams(p => ({ ...p, 지하층: Math.max(0, p.지하층 - 1) }))} className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-[13px]">−</button>
+                    <span className="px-2.5 py-1 text-[12px] font-semibold text-gray-900 min-w-[36px] text-center">{editParams.지하층 === 0 ? "없음" : `B${editParams.지하층}`}</span>
+                    <button onClick={() => setEditParams(p => ({ ...p, 지하층: Math.min(5, p.지하층 + 1) }))} className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-[13px]">+</button>
+                  </div>
+                </div>
+                {[
+                  { key: "대지면적" as const, label: "대지면적", warn: false },
+                  { key: "건축면적입력" as const, label: "건축면적", warn: computed.건폐율초과 },
+                  { key: "연면적입력" as const, label: "연면적", warn: computed.용적률초과 },
+                ].map(({ key, label, warn }) => (
+                  <div key={key}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-gray-500 shrink-0">{label}</span>
+                      <div className="flex items-center gap-1">
+                        <input type="number" value={editParams[key] || ""} onChange={e => setEditParams(p => ({ ...p, [key]: parseFloat(e.target.value) || 0 }))} placeholder="최대"
+                          className={`border rounded-lg px-2 py-1 text-[11px] text-gray-900 w-20 bg-white focus:outline-none ${warn ? "border-red-400 bg-red-50" : "border-gray-200 focus:border-blue-400"}`} />
+                        <span className="text-[10px] text-gray-400">㎡</span>
+                      </div>
                     </div>
+                    {key === "건축면적입력" && computed.건폐율초과 && <div className="text-[10px] text-red-500 text-right">최대 {computed.areas?.최대건축면적}㎡ 초과</div>}
+                    {key === "연면적입력" && computed.용적률초과 && <div className="text-[10px] text-red-500 text-right">최대 {computed.areas?.최대연면적?.toLocaleString()}㎡ 초과</div>}
                   </div>
                 ))}
-              </div>
-              {Object.values(용도별면적).some(v => v > 0) && (() => {
-                const 합계 = Object.values(용도별면적).reduce((a, b) => a + b, 0);
-                const 계획 = computed.계획연면적;
-                const 초과 = 합계 > 계획;
-                return (
-                  <div className={`mt-2 text-[11px] font-medium ${초과 ? "text-red-600" : "text-blue-600"}`}>
-                    합계 {합계.toLocaleString()}㎡ / 계획연면적 {계획.toLocaleString()}㎡
-                    {초과 && " ⚠️ 계획연면적 초과"}
-                    {computed.복합주차 && ` → 주차 합산 ${computed.복합주차.총대수}대`}
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-gray-500">필로티</span>
+                  <button onClick={() => setEditParams(p => ({ ...p, 필로티: !p.필로티 }))}
+                    className={`px-3 py-1 rounded-lg text-[11px] font-medium border transition-colors ${editParams.필로티 ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200"}`}>
+                    {editParams.필로티 ? "적용 중" : "미적용"}
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-gray-500 shrink-0">높이</span>
+                  <div className="flex items-center gap-1">
+                    <input type="number" value={editParams.높이 || ""} onChange={e => setEditParams(p => ({ ...p, 높이: parseFloat(e.target.value) || 0 }))} placeholder="추정"
+                      className="border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-900 w-20 bg-white focus:outline-none focus:border-blue-400" />
+                    <span className="text-[10px] text-gray-400">m</span>
                   </div>
-                );
-              })()}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-gray-500">구조</span>
+                  <select value={editParams.구조} onChange={e => setEditParams(p => ({ ...p, 구조: e.target.value }))}
+                    className="border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-900 bg-white focus:outline-none">
+                    {["RC", "철골", "목조", "조적"].map(v => <option key={v}>{v}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* 복합용도 면적 배분 */}
+            {용도목록.length > 1 && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold text-blue-700">복합용도 배분</span>
+                  {Object.values(용도별면적).some(v => v > 0) && (
+                    <button onClick={() => set용도별면적({})} className="text-[10px] text-gray-400 hover:text-gray-600 underline">초기화</button>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  {용도목록.map(u => (
+                    <div key={u} className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] text-gray-600 truncate flex-1">{u}</span>
+                      <div className="flex items-center gap-1">
+                        <input type="number" value={용도별면적[u] || ""} onChange={e => set용도별면적(p => ({ ...p, [u]: parseFloat(e.target.value) || 0 }))} placeholder="면적"
+                          className="border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-900 w-16 bg-white focus:outline-none" />
+                        <span className="text-[10px] text-gray-400">㎡</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {Object.values(용도별면적).some(v => v > 0) && (() => {
+                  const 합계 = Object.values(용도별면적).reduce((a, b) => a + b, 0);
+                  const 초과 = 합계 > computed.계획연면적;
+                  return (
+                    <div className={`mt-1.5 text-[10px] font-medium ${초과 ? "text-red-600" : "text-blue-600"}`}>
+                      합계 {합계.toLocaleString()}㎡{computed.복합주차 && ` · 주차 ${computed.복합주차.총대수}대`}
+                      {초과 && " ⚠️ 초과"}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* PDF 도면 추출 */}
+            <PdfExtractPanel
+              onApply={(res) => {
+                setPdfFloors(res);
+                if (res.지상층수) setEditParams(p => ({ ...p, 층수: res.지상층수! }));
+                if (res.대지면적)  setEditParams(p => ({ ...p, 대지면적: res.대지면적! }));
+                if (res.건축면적)  setEditParams(p => ({ ...p, 건축면적입력: res.건축면적! }));
+              }}
+            />
+          </>)}
+        </div>{/* end flex-1 overflow-y-auto */}
+
+        {/* 사이드바 하단 고정 버튼 */}
+        {r && computed && (
+          <div className="border-t border-gray-200 p-3 space-y-2 shrink-0">
+            <div className="flex gap-1.5">
+              <button onClick={() => window.print()} className="flex-1 py-2 bg-gray-100 text-gray-600 rounded-xl text-[11px] font-medium hover:bg-gray-200">🖨 인쇄</button>
+              <button onClick={() => { setApiResult(null); setNotionUrl(null); setAddress(""); set용도목록([]); set용도입력(""); set용도별면적({}); setInputStep(1); setLawCheck(null); setShowFolderPanel(false); setFolderName(""); setParcelData(null); setSurroundings(null); setSiteFromOSM(false); setPdfFloors(null); }}
+                className="flex-1 py-2 bg-gray-100 text-gray-500 rounded-xl text-[11px] hover:bg-gray-200">초기화</button>
+            </div>
+            {notionUrl && (
+              <a href={notionUrl} target="_blank" rel="noreferrer" className="block text-center text-[11px] text-blue-600 bg-blue-50 rounded-lg py-2 hover:bg-blue-100">
+                ✅ Notion 저장됨 — 열기 →
+              </a>
+            )}
+          </div>
+        )}
+      </aside>
+
+      {/* ──────────────── 메인 콘텐츠 ──────────────── */}
+      <main className="flex-1 min-w-0 overflow-y-auto">
+        <div className="p-4 max-w-4xl">
+
+          {/* 로딩 */}
+          {loading && (
+            <div className="text-center py-16">
+              <div className="inline-block w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
+              <p className="text-[13px] text-gray-500">주소 검증 → 용도지역 조회 → 법규 분석 중...</p>
             </div>
           )}
+
+          {/* 초기 안내 */}
+          {!r && !loading && (
+            <div className="flex flex-col items-center justify-center py-28 text-center">
+              <div className="text-[52px] mb-4">🏛</div>
+              <p className="text-[15px] font-medium text-gray-400">왼쪽에서 사업 개요를 입력하고</p>
+              <p className="text-[15px] font-medium text-gray-400">법규검토를 시작하세요</p>
+              <p className="text-[12px] text-gray-300 mt-3">주소 · 용도 · 행위 입력 후 분석하면<br/>이 영역에 결과가 표시됩니다</p>
+            </div>
+          )}
+
+        {r && computed && (
+          <div className="space-y-3">
 
           {/* 주요 이슈 상단 고정 */}
           {(() => {
@@ -923,7 +971,7 @@ export default function Home() {
             );
           })()}
 
-          <div className="mt-4 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             <Accordion title="3D 법적 볼륨" badge={computed.areas ? `${editParams.층수}층 · 건축면적 ${computed.areas.최대건축면적}㎡` : ""}>
               {(() => {
                 const 건축면적 = computed.areas?.최대건축면적 ?? 0;
@@ -970,16 +1018,6 @@ export default function Home() {
                         </div>
                       ))}
                     </div>
-
-                    {/* PDF 도면 면적 추출 */}
-                    <PdfExtractPanel
-                      onApply={(res) => {
-                        setPdfFloors(res);
-                        if (res.지상층수) setEditParams(p => ({ ...p, 층수: res.지상층수! }));
-                        if (res.대지면적)  setEditParams(p => ({ ...p, 대지면적: res.대지면적! }));
-                        if (res.건축면적)  setEditParams(p => ({ ...p, 건축면적입력: res.건축면적! }));
-                      }}
-                    />
 
                     {/* PDF 층별 면적 결과 표시 */}
                     {pdfFloors && pdfFloors.floors.length > 0 && (
@@ -1358,66 +1396,47 @@ export default function Home() {
               </div>
             </Accordion>
 
-            <div className="px-4 py-4 bg-gray-50 border-t border-gray-100 space-y-2">
-              {showFolderPanel && r && computed && (
-                <div className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3 mb-1">
-                  <div className="text-[13px] font-semibold text-gray-700">Notion 저장 — 폴더 분류</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {행위 && <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{행위}</span>}
-                    {r.baseData?.siNm && <span className="text-[11px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">{r.baseData.siNm}</span>}
-                    {용도 && <span className="text-[11px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">{classify용도(용도)}</span>}
-                    {computed.areas?.최대연면적 && <span className="text-[11px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">{classify규모(computed.areas.최대연면적)}</span>}
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-gray-500 mb-1 block">프로젝트 폴더명</label>
-                    <input
-                      value={folderName}
-                      onChange={e => setFolderName(e.target.value)}
-                      placeholder="예: 강남구 신축 아파트 프로젝트"
-                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] text-gray-900 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                    />
-                    <div className="text-[10px] text-gray-400 mt-1">Notion DB에서 이 값으로 필터링하여 폴더처럼 관리합니다</div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => setShowFolderPanel(false)}
-                      className="flex-1 py-2 bg-gray-100 text-gray-600 rounded-xl text-[13px] font-medium hover:bg-gray-200">취소</button>
-                    <button onClick={() => handleNotionSave(folderName)} disabled={notionSaving}
-                      className="flex-1 py-2 bg-black text-white rounded-xl text-[13px] font-semibold hover:bg-gray-800 disabled:opacity-60">
-                      {notionSaving ? "저장 중…" : "저장"}
-                    </button>
-                  </div>
-                </div>
-              )}
-              <div className="flex gap-2">
-                <button onClick={handleDownload} className="flex-1 bg-[#1F4E79] text-white py-2.5 rounded-xl font-semibold text-[13px] hover:bg-[#1a3f63]">
-                  📄 DOCX
-                </button>
-                <button onClick={openFolderPanel} disabled={notionSaving}
-                  className="flex-1 bg-black text-white py-2.5 rounded-xl font-semibold text-[13px] hover:bg-gray-800 disabled:opacity-60">
-                  {notionSaving ? "저장 중…" : "🗒 Notion 저장"}
-                </button>
-                <button onClick={() => window.print()}
-                  className="px-4 py-2.5 bg-gray-200 text-gray-700 rounded-xl text-[13px] font-medium hover:bg-gray-300">
-                  🖨 인쇄
-                </button>
-                <button onClick={() => { setApiResult(null); setNotionUrl(null); setAddress(""); set용도목록([]); set용도입력(""); set용도별면적({}); setInputStep(1); setLawCheck(null); setShowFolderPanel(false); setFolderName(""); setParcelData(null); setSurroundings(null); setSiteFromOSM(false); }}
-                  className="px-3 py-2.5 bg-gray-100 text-gray-500 rounded-xl text-[13px] hover:bg-gray-200">
-                  초기화
-                </button>
-              </div>
-              {notionUrl && (
-                <a href={notionUrl} target="_blank" rel="noreferrer"
-                  className="block text-center text-[12px] text-blue-600 bg-blue-50 rounded-lg py-2 hover:bg-blue-100">
-                  ✅ Notion에 저장됨 — 클릭하여 열기
-                </a>
-              )}
-            </div>
           </div>
-          </>
+          </div>
         )}
 
-        <p className="text-center py-4 text-[11px] text-gray-400">법규검토 자동화 · 법제처·LURIS·건축물대장 API 기반</p>
-      </div>
+          <p className="text-center py-4 text-[11px] text-gray-400">법규검토 자동화 · 법제처·LURIS·건축물대장 API 기반</p>
+        </div>{/* end max-w-4xl */}
+      </main>
+
+      {/* Notion 저장 모달 */}
+      {showFolderPanel && r && computed && (
+        <div className="fixed inset-0 z-30 bg-black/40 flex items-center justify-center p-4" onClick={() => setShowFolderPanel(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="text-[15px] font-semibold text-gray-700">Notion 저장 — 폴더 분류</div>
+            <div className="flex flex-wrap gap-1.5">
+              {행위 && <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{행위}</span>}
+              {r.baseData?.siNm && <span className="text-[11px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">{r.baseData.siNm}</span>}
+              {용도 && <span className="text-[11px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">{classify용도(용도)}</span>}
+              {computed.areas?.최대연면적 && <span className="text-[11px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">{classify규모(computed.areas.최대연면적)}</span>}
+            </div>
+            <div>
+              <label className="text-[11px] text-gray-500 mb-1 block">프로젝트 폴더명</label>
+              <input
+                value={folderName}
+                onChange={e => setFolderName(e.target.value)}
+                placeholder="예: 강남구 신축 아파트 프로젝트"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] text-gray-900 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+              <div className="text-[10px] text-gray-400 mt-1">Notion DB에서 이 값으로 필터링하여 폴더처럼 관리합니다</div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setShowFolderPanel(false)}
+                className="flex-1 py-2.5 bg-gray-100 text-gray-600 rounded-xl text-[13px] font-medium hover:bg-gray-200">취소</button>
+              <button onClick={() => handleNotionSave(folderName)} disabled={notionSaving}
+                className="flex-1 py-2.5 bg-black text-white rounded-xl text-[13px] font-semibold hover:bg-gray-800 disabled:opacity-60">
+                {notionSaving ? "저장 중…" : "저장"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  </div>
   );
 }
