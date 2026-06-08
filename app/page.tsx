@@ -314,7 +314,9 @@ export default function Home() {
         const area = 용도별면적[u] || 0;
         if (area <= 0) continue;
         const 공동 = ["아파트","연립주택","다세대주택","기숙사"].some(k => u.includes(k));
-        const pk = calcParking(u, area, 공동 ? (apiResult.baseData?.세대수 ?? 0) : 0);
+        // 사용자 입력 세대수 우선, 없으면 건축물대장 세대수 사용
+        const 적용세대수 = 세대수입력 > 0 ? 세대수입력 : (apiResult.baseData?.세대수 ?? 0);
+        const pk = calcParking(u, area, 공동 ? 적용세대수 : 0);
         if (pk) { details.push({ 용도: u, 면적: area, 대수: pk.대수, 근거: pk.근거 }); 총 += pk.대수; }
       }
       if (details.length > 0) {
@@ -334,7 +336,7 @@ export default function Home() {
     }
 
     return { areas, scaleItems, designItems, permitItems, scheduleItems, scheduleTotalMonths, 건폐율초과, 용적률초과, 계획연면적, 복합주차 };
-  }, [apiResult, editParams, 용도별면적, 용도목록]);
+  }, [apiResult, editParams, 용도별면적, 용도목록, 세대수입력]);
 
   async function handleAnalyze() {
     if (!address) { setError("주소를 입력해주세요"); return; }
@@ -592,10 +594,12 @@ export default function Home() {
             </div>
           </div>
           {error && <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-[13px] text-red-600">{error}</div>}
-          <button onClick={() => { if (!address) { setError("주소를 입력해주세요"); return; } if (용도목록.length === 0) { setError("용도를 하나 이상 선택해주세요"); return; } setError(""); setInputStep(2); }}
-            className="w-full bg-[#1F4E79] text-white py-3 rounded-xl font-semibold text-[15px] hover:bg-[#1a3f63] transition-colors">
-            다음 단계 →
-          </button>
+          <div className="pt-3">
+            <button onClick={() => { if (!address) { setError("주소를 입력해주세요"); return; } if (용도목록.length === 0) { setError("용도를 하나 이상 선택해주세요"); return; } setError(""); setInputStep(2); }}
+              className="w-full bg-[#1F4E79] text-white py-3 rounded-xl font-semibold text-[15px] hover:bg-[#1a3f63] transition-colors">
+              다음 단계 →
+            </button>
+          </div>
           </>}
 
           {/* ── STEP 2: 상세 설정 ── */}
