@@ -246,7 +246,9 @@ export default function Home() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showUseSuggestions, setShowUseSuggestions] = useState(false);
-  const [editParams, setEditParams] = useState({ 층수: 0, 대지면적: 0, 건축면적입력: 0, 연면적입력: 0, 지하층: 0, 필로티: false, 높이: 0, 구조: "RC" });
+  const [층수직접입력, set층수직접입력] = useState(false);
+  const [층수입력폼, set층수입력폼] = useState(0);
+  const [editParams, setEditParams] = useState({ 층수: 0, 대지면적: 0, 건축면적입력: 0, 연면적입력: 0, 지하층: 0, 필로티: false, 높이: 0, 구조: "RC", 북측이격: 0 });
   const [notionSaving, setNotionSaving] = useState(false);
   const [notionUrl, setNotionUrl] = useState<string | null>(null);
   const [showFolderPanel, setShowFolderPanel] = useState(false);
@@ -298,8 +300,9 @@ export default function Home() {
       건폐율: effectiveRule?.건폐율, 용적률: effectiveRule?.용적률,
       최대건축면적: areas?.최대건축면적, 최대연면적,
       세대수: apiResult.baseData?.세대수 ?? 0,
+      북측이격: editParams.북측이격 || undefined,
     });
-    const designItems = judgeDesignItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 기타지구, 높이: editParams.높이 || undefined, 구조: editParams.구조 });
+    const designItems = judgeDesignItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 기타지구, 높이: editParams.높이 || undefined, 구조: editParams.구조, siNm });
     const permitItems = judgePermitItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 기타지구, 시도: siNm, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 교육환경구역: apiResult.baseData?.교육환경구역 ?? null });
     const { schedule: scheduleItems, totalMonths: scheduleTotalMonths } = generateSchedule({
       용도: apiResult.용도 || "", 연면적: 계획연면적, 층수, 대지면적,
@@ -316,7 +319,7 @@ export default function Home() {
         const 공동 = ["아파트","연립주택","다세대주택","기숙사"].some(k => u.includes(k));
         // 사용자 입력 세대수 우선, 없으면 건축물대장 세대수 사용
         const 적용세대수 = 세대수입력 > 0 ? 세대수입력 : (apiResult.baseData?.세대수 ?? 0);
-        const pk = calcParking(u, area, 공동 ? 적용세대수 : 0);
+        const pk = calcParking(u, area, 공동 ? 적용세대수 : 0, siNm);
         if (pk) { details.push({ 용도: u, 면적: area, 대수: pk.대수, 근거: pk.근거 }); 총 += pk.대수; }
       }
       if (details.length > 0) {
@@ -336,7 +339,7 @@ export default function Home() {
     }
 
     return { areas, scaleItems, designItems, permitItems, scheduleItems, scheduleTotalMonths, 건폐율초과, 용적률초과, 계획연면적, 복합주차 };
-  }, [apiResult, editParams, 용도별면적, 용도목록, 세대수입력]);
+  }, [apiResult, editParams, 용도별면적, 용도목록, 세대수입력, 층수직접입력]);
 
   async function handleAnalyze() {
     if (!address) { setError("주소를 입력해주세요"); return; }
@@ -344,11 +347,12 @@ export default function Home() {
     try {
       const res = await fetch("/api/analyze", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address, 용도, 행위, 지하층입력, 세대수입력, 대수선옵션: 행위 === "대수선" ? 대수선옵션 : null }),
+        body: JSON.stringify({ address, 용도, 행위, 층수입력: 층수입력폼, 지하층입력, 세대수입력, 대수선옵션: 행위 === "대수선" ? 대수선옵션 : null }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "분석 실패");
       setApiResult(data);
+      set층수직접입력(data.층수직접입력 ?? false);
       setEditParams({
         층수: data.추정층수 || 0,
         대지면적: data.baseData?.대지면적 || 0,
@@ -357,8 +361,14 @@ export default function Home() {
         건축면적입력: 0,
         연면적입력: 0,
         높이: 0,
-        구조: "RC",
+        구조: data.baseData?.구조 ?? "RC",
+        북측이격: 0,
       });
+      // 대수선: 건축물대장 준공일 자동 입력
+      if (행위 === "대수선" && data.baseData?.준공일 && !대수선옵션.준공연도) {
+        const 연도 = String(data.baseData.준공일).slice(0, 4);
+        if (연도.length === 4) set대수선옵션(o => ({ ...o, 준공연도: 연도 }));
+      }
       // 필지 폴리곤 비동기 조회
       setParcelData(null);
       setSiteFromOSM(false);
@@ -724,6 +734,26 @@ export default function Home() {
           )}
 
           <div>
+            <label className="text-[12px] text-gray-500 mb-1 block">
+              지상층수
+              <span className="ml-1 text-[10px] text-gray-400">(미입력 시 자동 추정)</span>
+            </label>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden">
+                <button onClick={() => set층수입력폼(v => Math.max(0, v - 1))}
+                  className="px-3 py-2 text-gray-600 hover:bg-gray-100 text-[16px] font-bold">−</button>
+                <span className="px-4 py-2 text-[14px] font-semibold text-gray-800 min-w-[52px] text-center">
+                  {층수입력폼 === 0 ? "자동" : `${층수입력폼}층`}
+                </span>
+                <button onClick={() => set층수입력폼(v => Math.min(50, v + 1))}
+                  className="px-3 py-2 text-gray-600 hover:bg-gray-100 text-[16px] font-bold">+</button>
+              </div>
+              {층수입력폼 === 0 && (
+                <span className="text-[10px] text-amber-600">⚠️ 소방·피난 기준 추정 적용</span>
+              )}
+            </div>
+          </div>
+          <div>
             <label className="text-[12px] text-gray-500 mb-1 block">지하층 수</label>
             <div className="flex items-center gap-3">
               <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden">
@@ -800,19 +830,27 @@ export default function Home() {
               <div className="flex items-center justify-between mb-2">
                 <div className="text-[11px] font-bold text-gray-600">수치 조정</div>
                 {(editParams.층수 !== r.추정층수 || editParams.대지면적 !== r.baseData?.대지면적 || editParams.건축면적입력 > 0 || editParams.연면적입력 > 0 || editParams.지하층 !== r.지하층 || editParams.필로티 || editParams.높이 > 0 || editParams.구조 !== "RC") && (
-                  <button onClick={() => setEditParams({ 층수: r.추정층수 || 0, 대지면적: r.baseData?.대지면적 || 0, 건축면적입력: 0, 연면적입력: 0, 지하층: r.지하층 || 0, 필로티: false, 높이: 0, 구조: "RC" })}
+                  <button onClick={() => { setEditParams({ 층수: r.추정층수 || 0, 대지면적: r.baseData?.대지면적 || 0, 건축면적입력: 0, 연면적입력: 0, 지하층: r.지하층 || 0, 필로티: false, 높이: 0, 구조: r.baseData?.구조 ?? "RC", 북측이격: 0 }); set층수직접입력(r.층수직접입력 ?? false); }}
                     className="text-[10px] text-gray-400 hover:text-gray-600 underline">초기화</button>
                 )}
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-gray-500">지상층수</span>
+                  <span className="text-[11px] text-gray-500 flex items-center gap-1">
+                    지상층수
+                    {!층수직접입력 && <span className="text-[9px] bg-amber-100 text-amber-700 px-1 py-0.5 rounded font-medium">추정</span>}
+                  </span>
                   <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white">
-                    <button onClick={() => setEditParams(p => ({ ...p, 층수: Math.max(1, p.층수 - 1) }))} className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-[13px]">−</button>
+                    <button onClick={() => { setEditParams(p => ({ ...p, 층수: Math.max(1, p.층수 - 1) })); set층수직접입력(true); }} className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-[13px]">−</button>
                     <span className="px-2.5 py-1 text-[12px] font-semibold text-gray-900 min-w-[36px] text-center">{editParams.층수}층</span>
-                    <button onClick={() => setEditParams(p => ({ ...p, 층수: p.층수 + 1 }))} className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-[13px]">+</button>
+                    <button onClick={() => { setEditParams(p => ({ ...p, 층수: p.층수 + 1 })); set층수직접입력(true); }} className="px-2 py-1 text-gray-600 hover:bg-gray-100 text-[13px]">+</button>
                   </div>
                 </div>
+                {!층수직접입력 && (
+                  <div className="text-[10px] text-amber-600 text-right -mt-0.5">
+                    소방·피난 기준이 추정값 기준으로 산정됨. +/−로 조정하세요
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] text-gray-500">지하층수</span>
                   <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white">
@@ -854,6 +892,25 @@ export default function Home() {
                     <span className="text-[10px] text-gray-400">m</span>
                   </div>
                 </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-gray-500 shrink-0">북측이격</span>
+                  <div className="flex items-center gap-1">
+                    <input type="number" value={editParams.북측이격 || ""} onChange={e => setEditParams(p => ({ ...p, 북측이격: parseFloat(e.target.value) || 0 }))} placeholder="미입력"
+                      className="border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-900 w-20 bg-white focus:outline-none focus:border-blue-400" />
+                    <span className="text-[10px] text-gray-400">m</span>
+                  </div>
+                </div>
+                {editParams.북측이격 > 0 && apiResult?.zoneName?.includes("주거") && (() => {
+                  const 지역 = apiResult.zoneName ?? "";
+                  const 배율 = 지역.includes("전용주거") || 지역.includes("1종일반") ? 2 : 4;
+                  const 가산 = 지역.includes("전용주거") || 지역.includes("1종일반") ? 0 : 지역.includes("2종일반") ? 4 : 8;
+                  const 허용 = Math.round((editParams.북측이격 * 배율 + 가산) * 10) / 10;
+                  return (
+                    <div className="text-[10px] text-blue-600 text-right -mt-0.5">
+                      정북사선 허용높이 ≤ {허용}m
+                    </div>
+                  );
+                })()}
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] text-gray-500">구조</span>
                   <select value={editParams.구조} onChange={e => setEditParams(p => ({ ...p, 구조: e.target.value }))}

@@ -9,7 +9,7 @@ import { getContacts, 서울시청부서, 구청표준부서 } from "@/lib/conta
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { address, 용도, 행위 = "신축", 층수입력, 지하층입력 = 0, 세대수입력 = 0 } = body;
+    const { address, 용도, 행위 = "신축", 층수입력 = 0, 지하층입력 = 0, 세대수입력 = 0 } = body;
     if (!address) return NextResponse.json({ error: "주소를 입력해주세요" }, { status: 400 });
 
     // STEP 0: 주소 검증
@@ -53,7 +53,8 @@ export async function POST(req: NextRequest) {
     }
 
     const 지하층 = parseInt(String(지하층입력)) || 0;
-    const 추정층수 = parseInt(층수입력) || areas?.추정층수 || 0;
+    const 층수직접입력 = parseInt(String(층수입력)) > 0;
+    const 추정층수 = parseInt(String(층수입력)) || areas?.추정층수 || 0;
     const 최대연면적 = areas?.최대연면적 ?? 0;
     const 세대수 = parseInt(String(세대수입력)) || 0;
 
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
       건폐율: effectiveRule?.건폐율, 용적률: effectiveRule?.용적률,
       최대건축면적: areas?.최대건축면적, 최대연면적,
     });
-    const designItems = judgeDesignItems({ 연면적: 최대연면적, 층수: 추정층수, 용도: 용도||"", 대지면적: 대지면적_val, 지하층, 세대수, 기타지구: land.기타지구 });
+    const designItems = judgeDesignItems({ 연면적: 최대연면적, 층수: 추정층수, 용도: 용도||"", 대지면적: 대지면적_val, 지하층, 세대수, 기타지구: land.기타지구, siNm: addrInfo.siNm || "" });
     const permitItems = judgePermitItems({
       연면적: 최대연면적, 층수: 추정층수, 용도: 용도||"",
       대지면적: 대지면적_val, 기타지구: land.기타지구, 시도: addrInfo.siNm||"", 지하층, 세대수,
@@ -112,6 +113,7 @@ export async function POST(req: NextRequest) {
       연락처, 시청부서, 구청부서,
       대수선결과,
       // 클라이언트 재계산에 필요한 고정 데이터
+      층수직접입력,
       baseData: {
         대지면적: 대지면적_val,
         effectiveRule,
@@ -120,6 +122,9 @@ export async function POST(req: NextRequest) {
         zoneName,
         세대수,
         교육환경구역: educationZone,
+        구조: bldgInfo?.구조 ?? null,
+        준공일: bldgInfo?.준공일 ?? null,
+        bldg지하층수: bldgInfo?.지하층수 ?? null,
       },
     });
   } catch (e: any) {
