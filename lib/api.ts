@@ -41,16 +41,6 @@ export async function fetchAddressInfo(keyword: string) {
   };
 }
 
-// 건축물대장 구조코드 → 설계 구조 표준값 변환
-function parseStrctCode(cdNm: string | null): string {
-  if (!cdNm) return "RC";
-  if (cdNm.includes("철근콘크리트") || cdNm.includes("RC") || cdNm.includes("PC")) return "RC";
-  if (cdNm.includes("철골") || cdNm.includes("강구조")) return "철골";
-  if (cdNm.includes("목구조") || cdNm.includes("목조")) return "목조";
-  if (cdNm.includes("조적") || cdNm.includes("벽돌") || cdNm.includes("블록")) return "조적";
-  return "RC";
-}
-
 // ── 건축물대장 ────────────────────────────────────────────────────────────────
 export async function fetchBuildingInfo(sigunguCd: string, bjdongCd: string, bun: string, ji: string) {
   const params = new URLSearchParams({
@@ -68,11 +58,8 @@ export async function fetchBuildingInfo(sigunguCd: string, bjdongCd: string, bun
       대지면적:  parseFloat(it.platArea) || null,
       연면적:    parseFloat(it.totArea) || null,
       층수:      parseInt(it.grndFlrCnt) || null,
-      지하층수:  parseInt(it.ugrndFlrCnt) || null,
       주용도:    it.mainPurpsCdNm ?? null,
       준공일:    it.useAprDay ? String(it.useAprDay) : null,
-      세대수:    parseInt(it.hhldCnt) || null,
-      구조:      parseStrctCode(it.strctCdNm ?? null),
     };
   } catch { return null; }
 }
@@ -246,6 +233,9 @@ const ORDINANCES: Record<string, OrdinanceDB> = {
     "일반상업지역":      { 건폐율:80, 용적률:1300 },
     "준공업지역":        { 건폐율:70, 용적률:400 },
     "자연녹지지역":      { 건폐율:20, 용적률:100 },
+  },
+  "광주광역시": {
+    "제3종일반주거지역": { 건폐율:50, 용적률:250 },
   },
   "경기도": {
     "제1종전용주거지역": { 건폐율:50, 용적률:100 },
