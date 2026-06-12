@@ -55,10 +55,20 @@ export async function POST(req: NextRequest) {
       areas = { 대지면적: 대지면적_val, 최대건축면적, 최대연면적, 추정층수 };
     }
 
-    const 지하층 = parseInt(String(지하층입력)) || 0;
-    const 추정층수 = parseInt(층수입력) || areas?.추정층수 || 0;
+    // 건축물대장에서 가져온 값이 있으면 우선 사용
+    const 지하층 = parseInt(String(지하층입력)) || bldgInfo?.지하층수 || 0;
+    const 추정층수 = parseInt(층수입력) || bldgInfo?.층수 || areas?.추정층수 || 0;
     const 최대연면적 = areas?.최대연면적 ?? 0;
-    const 세대수 = parseInt(String(세대수입력)) || 0;
+    const 세대수 = parseInt(String(세대수입력)) || bldgInfo?.세대수 || 0;
+    // 구조: 건축물대장 문자열 → 약식 코드 변환
+    const 구조코드 = (() => {
+      const s = bldgInfo?.구조 ?? "";
+      if (s.includes("철근콘크리트") || s.includes("RC") || s.includes("SRC")) return "RC";
+      if (s.includes("철골") || s.includes("강구조")) return "철골";
+      if (s.includes("목구조") || s.includes("목조")) return "목조";
+      if (s.includes("조적") || s.includes("벽돌")) return "조적";
+      return "RC"; // 기본
+    })();
 
     // 좌표·교육환경보호구역 (판단 전 선조회)
     const coords = await fetchCoordinates(addrInfo.roadAddr ?? address).catch(() => null);
@@ -73,7 +83,7 @@ export async function POST(req: NextRequest) {
       건폐율: effectiveRule?.건폐율, 용적률: effectiveRule?.용적률,
       최대건축면적: areas?.최대건축면적, 최대연면적,
     });
-    const designItems = judgeDesignItems({ 연면적: 최대연면적, 층수: 추정층수, 용도: 용도||"", 대지면적: 대지면적_val, 지하층, 세대수, 기타지구: land.기타지구, 시도: addrInfo.siNm || "" });
+    const designItems = judgeDesignItems({ 연면적: 최대연면적, 층수: 추정층수, 용도: 용도||"", 대지면적: 대지면적_val, 지하층, 세대수, 기타지구: land.기타지구, 시도: addrInfo.siNm || "", 높이: bldgInfo?.높이 ?? undefined, 구조: 구조코드, 구조출처: bldgInfo?.구조 ? "대장확인" : "추정" });
     const permitItems = judgePermitItems({
       연면적: 최대연면적, 층수: 추정층수, 용도: 용도||"",
       대지면적: 대지면적_val, 기타지구: land.기타지구, 시도: addrInfo.siNm||"", 지하층, 세대수,
@@ -126,6 +136,11 @@ export async function POST(req: NextRequest) {
         세대수,
         지목: land.지목,
         교육환경구역: educationZone,
+        준공일: bldgInfo?.준공일 ?? null,
+        구조: 구조코드,
+        구조출처: bldgInfo?.구조 ? "대장확인" : "추정",
+        높이: bldgInfo?.높이 ?? null,
+        지하층수: bldgInfo?.지하층수 ?? null,
       },
     });
   } catch (e: any) {

@@ -55,10 +55,14 @@ export async function fetchBuildingInfo(sigunguCd: string, bjdongCd: string, bun
     const it   = Array.isArray(item) ? item[0] : item;
     if (!it) return null;
     return {
-      대지면적:  parseFloat(it.platArea) || null,
-      연면적:    parseFloat(it.totArea) || null,
-      층수:      parseInt(it.grndFlrCnt) || null,
-      주용도:    it.mainPurpsCdNm ?? null,
+      대지면적:  parseFloat(it.platArea)  || null,
+      연면적:    parseFloat(it.totArea)   || null,
+      층수:      parseInt(it.grndFlrCnt)  || null,
+      지하층수:  parseInt(it.ugrndFlrCnt) || null,
+      세대수:    parseInt(it.hhldCnt)     || null,
+      높이:      parseFloat(it.heit)      || null,
+      구조:      it.strctCdNm             ?? null,  // e.g. "철근콘크리트구조"
+      주용도:    it.mainPurpsCdNm         ?? null,
       준공일:    it.useAprDay ? String(it.useAprDay) : null,
     };
   } catch { return null; }

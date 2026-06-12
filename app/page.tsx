@@ -249,7 +249,7 @@ export default function Home() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showUseSuggestions, setShowUseSuggestions] = useState(false);
   const [층수입력폼, set층수입력폼] = useState(0);
-  const [editParams, setEditParams] = useState({ 층수: 0, 층수직접입력: false, 대지면적: 0, 건축면적입력: 0, 연면적입력: 0, 지하층: 0, 필로티: false, 높이: 0, 구조: "RC", 북측이격: 0 });
+  const [editParams, setEditParams] = useState({ 층수: 0, 층수직접입력: false, 대지면적: 0, 건축면적입력: 0, 연면적입력: 0, 지하층: 0, 필로티: false, 높이: 0, 구조: "RC", 북측이격: 0, 오피스텔전용면적: 0 });
   const [notionSaving, setNotionSaving] = useState(false);
   const [notionUrl, setNotionUrl] = useState<string | null>(null);
   const [showFolderPanel, setShowFolderPanel] = useState(false);
@@ -295,6 +295,19 @@ export default function Home() {
       : 최대연면적;
     const 건폐율초과 = 건축면적v > 0 && !!areas && 건축면적v > areas.최대건축면적;
     const 용적률초과 = 연면적v > 0 && 연면적v > 최대연면적;
+    // OSM 도로 데이터에서 가장 가까운 도로 폭 추출 (parcel 중심 기준 30m 이내)
+    const 인접도로폭 = (() => {
+      if (!surroundings?.roads?.length) return undefined;
+      // 로컬 좌표 [0,0]에서 가장 가까운 도로의 폭 반환
+      let minDist = Infinity, closestWidth = 0;
+      for (const road of surroundings.roads) {
+        for (const [rx, ry] of road.coords) {
+          const d = Math.sqrt(rx * rx + ry * ry);
+          if (d < minDist) { minDist = d; closestWidth = road.width; }
+        }
+      }
+      return minDist < 30 ? closestWidth : undefined;
+    })();
     const scaleItems = judgeScaleItems({
       대지면적, 연면적: 계획연면적, 층수,
       용도: apiResult.용도 || "", 용도지역: zoneName || "", 기타지구,
@@ -302,9 +315,10 @@ export default function Home() {
       최대건축면적: areas?.최대건축면적, 최대연면적,
       세대수: apiResult.baseData?.세대수 ?? 0,
       북측이격: editParams.북측이격 || undefined,
+      인접도로폭,
     });
     const 층수추정 = !editParams.층수직접입력;
-    const designItems = judgeDesignItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 기타지구, 높이: editParams.높이 || undefined, 구조: editParams.구조, 시도: siNm, 층수추정 });
+    const designItems = judgeDesignItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 기타지구, 높이: editParams.높이 || undefined, 구조: editParams.구조, 시도: siNm, 층수추정, 오피스텔전용면적: editParams.오피스텔전용면적 || undefined });
     const permitItems = judgePermitItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 기타지구, 시도: siNm, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 층수추정, 지목: apiResult.baseData?.지목 ?? "", 교육환경구역: apiResult.baseData?.교육환경구역 ?? null });
     const { schedule: scheduleItems, totalMonths: scheduleTotalMonths } = generateSchedule({
       용도: apiResult.용도 || "", 연면적: 계획연면적, 층수, 대지면적,
@@ -339,7 +353,7 @@ export default function Home() {
     }
 
     return { areas, scaleItems, designItems, permitItems, scheduleItems, scheduleTotalMonths, 건폐율초과, 용적률초과, 계획연면적, 복합주차 };
-  }, [apiResult, editParams, 용도별면적, 용도목록]);
+  }, [apiResult, editParams, 용도별면적, 용도목록, surroundings]);
 
   async function handleAnalyze() {
     if (!address) { setError("주소를 입력해주세요"); return; }
@@ -363,6 +377,7 @@ export default function Home() {
         높이: 0,
         구조: data.baseData?.구조 ?? "RC",
         북측이격: 0,
+        오피스텔전용면적: 0,
       });
       // 대수선: 건축물대장 준공일 자동 입력
       if (행위 === "대수선" && data.baseData?.준공일 && !대수선옵션.준공연도) {
@@ -870,7 +885,7 @@ export default function Home() {
               <div className="flex items-center justify-between mb-2">
                 <div className="text-[11px] font-bold text-gray-600">수치 조정</div>
                 {(editParams.층수 !== r.추정층수 || editParams.대지면적 !== r.baseData?.대지면적 || editParams.건축면적입력 > 0 || editParams.연면적입력 > 0 || editParams.지하층 !== r.지하층 || editParams.필로티 || editParams.높이 > 0 || editParams.구조 !== "RC") && (
-                  <button onClick={() => setEditParams({ 층수: r.추정층수 || 0, 층수직접입력: false, 대지면적: r.baseData?.대지면적 || 0, 건축면적입력: 0, 연면적입력: 0, 지하층: r.지하층 || 0, 필로티: false, 높이: 0, 구조: r.baseData?.구조 ?? "RC", 북측이격: 0 })}
+                  <button onClick={() => setEditParams({ 층수: r.추정층수 || 0, 층수직접입력: false, 대지면적: r.baseData?.대지면적 || 0, 건축면적입력: 0, 연면적입력: 0, 지하층: r.지하층 || 0, 필로티: false, 높이: 0, 구조: r.baseData?.구조 ?? "RC", 북측이격: 0, 오피스텔전용면적: 0 })}
                     className="text-[10px] text-gray-400 hover:text-gray-600 underline">초기화</button>
                 )}
               </div>
@@ -917,6 +932,19 @@ export default function Home() {
                     {key === "연면적입력" && computed.용적률초과 && <div className="text-[10px] text-red-500 text-right">최대 {computed.areas?.최대연면적?.toLocaleString()}㎡ 초과</div>}
                   </div>
                 ))}
+                {용도.includes("오피스텔") && (
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-gray-500 shrink-0">오피스텔 전용면적</span>
+                      <div className="flex items-center gap-1">
+                        <input type="number" value={editParams.오피스텔전용면적 || ""} onChange={e => setEditParams(p => ({ ...p, 오피스텔전용면적: parseFloat(e.target.value) || 0 }))} placeholder="예: 28"
+                          className="border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-900 w-20 bg-white focus:outline-none focus:border-blue-400" />
+                        <span className="text-[10px] text-gray-400">㎡</span>
+                      </div>
+                    </div>
+                    <div className="text-[9px] text-gray-400 text-right mt-0.5">30㎡ 이하 → 200㎡당 1대, 초과 → 120㎡당 1대</div>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] text-gray-500">필로티</span>
                   <button onClick={() => setEditParams(p => ({ ...p, 필로티: !p.필로티 }))}

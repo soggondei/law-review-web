@@ -480,10 +480,11 @@ export function judgeScaleItems(params: {
   북측이격?: number;
   층수추정?: boolean;
   조례확인?: boolean;
+  인접도로폭?: number;  // OSM에서 측정한 최근접 도로 폭(m)
 }) {
   const { 대지면적: 대지, 연면적: 면, 용도, 용도지역: 지역, 기타지구,
           건폐율, 용적률, 최대건축면적, 최대연면적, 세대수: 세대 = 0, 북측이격,
-          층수추정 = false, 조례확인 = true } = params;
+          층수추정 = false, 조례확인 = true, 인접도로폭 } = params;
   const items: LawReviewItem[] = [];
   const hasSiteArea = isPositive(대지);
   const hasTotalArea = isPositive(면);
@@ -560,13 +561,23 @@ export function judgeScaleItems(params: {
   });
 
   const 대로접속 = hasTotalArea && 면 >= 2000;
+  const 필요도로폭 = 대로접속 ? 6 : 4;
+  const 도로폭확인 = typeof 인접도로폭 === "number" && 인접도로폭 > 0;
+  const 도로폭충족 = 도로폭확인 && 인접도로폭 >= 필요도로폭;
+  const 도로폭미달 = 도로폭확인 && !도로폭충족;
   items.push({
     category:"아", 항목:"대지와 도로", 법령:"건축법 제44조",
     내용: !hasTotalArea
       ? "연면적과 접도 현황이 확인되어야 접도 기준을 확정 가능"
-      : 대로접속 ? "연면적 **2,000㎡ 이상**: 너비 **6m 이상** 도로에 **4m 이상** 접도" : "연면적 2,000㎡ 미만: 너비 **4m 이상** 도로에 **2m 이상** 접도",
-    해당여부: !hasTotalArea ? W("판단불가 — 연면적 및 접도 현황 확인 필요") : "✅ 의무",
-    설계기준: !hasTotalArea ? "도로 폭·접도 길이·도로 지정 여부 확인" : 대로접속 ? "6m도로 접도 4m↑" : "4m도로 접도 2m↑",
+      : 대로접속 ? `연면적 **2,000㎡ 이상**: 너비 **6m 이상** 도로에 **4m 이상** 접도${도로폭확인 ? ` (OSM 측정 인접도로: **${인접도로폭}m**)` : ""}` : `연면적 2,000㎡ 미만: 너비 **4m 이상** 도로에 **2m 이상** 접도${도로폭확인 ? ` (OSM 측정 인접도로: **${인접도로폭}m**)` : ""}`,
+    해당여부: !hasTotalArea ? W("판단불가 — 연면적 및 접도 현황 확인 필요")
+      : 도로폭미달 ? W(`인접도로 ${인접도로폭}m — 필요 ${필요도로폭}m 미달, 건축선 후퇴 또는 사실상도로 확인 필요`)
+      : 도로폭충족 ? `✅ 인접도로 ${인접도로폭}m — 접도 기준 충족 (OSM 기준, 현장 확인 권고)`
+      : "✅ 의무",
+    설계기준: !hasTotalArea ? "도로 폭·접도 길이·도로 지정 여부 확인"
+      : 도로폭미달 ? `도로 폭 ${인접도로폭}m < ${필요도로폭}m: 중심선 기준 후퇴선 = 건축선. 사실상도로·사도 포함 여부 구청 확인`
+      : 대로접속 ? "6m도로 접도 4m↑" : "4m도로 접도 2m↑",
+    confidence: 도로폭확인 ? "estimated" : undefined,  // OSM 측정값은 추정값
   });
 
   // ── 기타지구 반영 ─────────────────────────────────────────────────────────
@@ -715,9 +726,10 @@ export function judgeDesignItems(params: {
   시도?: string;
   층수추정?: boolean;
   구조출처?: "대장확인" | "추정" | "미확인";
+  오피스텔전용면적?: number;
 }) {
   const { 연면적: 면, 층수: 층, 용도, 지하층 = 0, 세대수 = 0, 기타지구 = [], 높이: 높이입력, 구조 = "RC", 시도 = "",
-          층수추정 = false, 구조출처 = "추정" } = params;
+          층수추정 = false, 구조출처 = "추정", 오피스텔전용면적 } = params;
   const hasTotalArea = isPositive(면);
   const hasFloors = isPositive(층);
   const 높이 = 높이입력 ?? 추정높이(용도, 층);  // 미입력 시 용도별 층고로 추정
@@ -733,7 +745,7 @@ export function judgeDesignItems(params: {
     내용:"가로구역별 최고높이 또는 일조권 사선 높이제한 적용",
     해당여부: W("토지이음 가로구역별 최고높이 확인 필요"), 설계기준:"토지이음·관할 구청 확인 후 설계" });
 
-  const pk = calcParking(용도, 면, 세대수, 시도);
+  const pk = calcParking(용도, 면, 세대수, 시도, 오피스텔전용면적 ? { 오피스텔전용면적 } : {});
   const parkingCount = typeof pk?.대수 === "number" ? pk.대수 : null;
   const 장애인수 = typeof pk?.장애인대수 === "number" ? pk.장애인대수 : 0;
   const 복합용도 = 용도.includes(" + ");

@@ -30,11 +30,55 @@ function lwPolyline(layer: string, pts: [number, number][], closed: boolean): st
   return lines.join("\n");
 }
 
-function buildDxf(entities: string[]): string {
+function dxfText(layer: string, x: number, y: number, height: number, text: string): string {
+  return [
+    g(0, "TEXT"),
+    g(8, layer),
+    g(10, x.toFixed(4)),
+    g(20, y.toFixed(4)),
+    g(30, 0),
+    g(40, height.toFixed(4)),
+    g(1, text),
+  ].join("\n");
+}
+
+function annotationEntities(addr: string): string[] {
+  const ents: string[] = [];
+  const ox = -28, oy = 32; // 좌상단 여백 기준
+
+  // 북방향 화살표 (N↑)
+  ents.push(lwPolyline("ANNOTATION", [[ox, oy], [ox, oy + 4]], false));
+  ents.push(lwPolyline("ANNOTATION", [[ox - 0.8, oy + 2.5], [ox, oy + 4], [ox + 0.8, oy + 2.5]], false));
+  ents.push(dxfText("ANNOTATION", ox - 0.6, oy + 4.5, 1.2, "N"));
+
+  // 스케일바 (10m)
+  const sx = ox + 5, sy = oy;
+  ents.push(lwPolyline("ANNOTATION", [[sx, sy], [sx + 10, sy]], false));
+  ents.push(lwPolyline("ANNOTATION", [[sx, sy - 0.5], [sx, sy + 0.5]], false));
+  ents.push(lwPolyline("ANNOTATION", [[sx + 10, sy - 0.5], [sx + 10, sy + 0.5]], false));
+  ents.push(dxfText("ANNOTATION", sx + 3.5, sy + 0.8, 0.9, "10m"));
+  ents.push(dxfText("ANNOTATION", sx + 1.5, sy - 1.8, 0.8, "SCALE BAR"));
+
+  // 레이어 범례
+  const lx = ox + 5, ly = oy - 5;
+  ents.push(dxfText("ANNOTATION", lx, ly,       0.9, "PARCEL    -- 지적 필지 경계 (Vworld)"));
+  ents.push(dxfText("ANNOTATION", lx, ly - 1.5, 0.9, "BUILDINGS -- 주변 건물 (OSM)"));
+  ents.push(dxfText("ANNOTATION", lx, ly - 3.0, 0.9, "ROADS     -- 도로 (OSM)"));
+
+  // 주소 + 생성일
+  const today = new Date().toISOString().slice(0, 10);
+  ents.push(dxfText("ANNOTATION", ox, oy - 12, 1.0, addr));
+  ents.push(dxfText("ANNOTATION", ox, oy - 13.8, 0.8, `생성: ${today}  좌표계: WGS84 로컬(m)`));
+
+  return ents;
+}
+
+function buildDxf(entities: string[], addr: string): string {
   const layers: { name: string; color: number }[] = [
-    { name: "PARCEL",    color: 1 },  // red   — 지적 필지
-    { name: "BUILDINGS", color: 7 },  // white — 주변 건물
-    { name: "ROADS",     color: 2 },  // yellow — 도로
+    { name: "PARCEL",     color: 1 },  // red
+    { name: "BUILDINGS",  color: 7 },  // white
+    { name: "ROADS",      color: 2 },  // yellow
+    { name: "ANNOTATION", color: 3 },  // green
   ];
 
   const header = [
@@ -64,6 +108,7 @@ function buildDxf(entities: string[]): string {
   const entSection = [
     g(0, "SECTION"), g(2, "ENTITIES"),
     ...entities,
+    ...annotationEntities(addr),
     g(0, "ENDSEC"),
     g(0, "EOF"),
   ].join("\n");
@@ -206,7 +251,7 @@ export async function GET(req: NextRequest) {
     }
   } catch { /* OSM 실패 시 주변 레이어 생략 */ }
 
-  const dxf = buildDxf(entities);
+  const dxf = buildDxf(entities, addr);
   const safe = addr.slice(0, 20).replace(/[/\\:*?"<>|]/g, "_");
   const filename = `지적도_${safe}.dxf`;
 
