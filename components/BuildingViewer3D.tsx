@@ -127,8 +127,8 @@ function ParcelOutline({ pts }: { pts: [number, number][] }) {
 
 // ── 건물 매스 (정북일조 사선 적용 시 층별 북측 클리핑) ───────────
 // 건축법 시행령 §86:
-//   topH ≤ 9m → 북경계에서 1.5m 이상 → allowedNorthY = parcelNorthY - 1.5
-//   topH > 9m → 북경계에서 topH/2 이상 → allowedNorthY = parcelNorthY - topH/2
+//   topH ≤ 10m → 북경계에서 1.5m 이상 (수직 허용)
+//   topH > 10m → 북경계에서 topH/2 이상 (사선 적용)
 function BuildingMass({ pts, 건축면적, 대지면적, 층수, sunApplicable }: {
   pts: [number, number][]; 건축면적: number; 대지면적: number; 층수: number; sunApplicable: boolean;
 }) {
@@ -140,9 +140,10 @@ function BuildingMass({ pts, 건축면적, 대지면적, 층수, sunApplicable }
     const slabPts  = shrinkPolygon(pts, Math.min(factor + 0.03, 0.97));
 
     // 층 상단 높이에 따른 북측 최대 Y (일조 적용 시)
+    // 10m 이하: 1.5m 고정 (수직벽 허용), 10m 초과: 높이/2
     const allowedNorthY = (topH: number): number => {
       if (!sunApplicable || topH <= 0) return Infinity;
-      return parcelNorthY - Math.max(1.5, topH / 2);
+      return parcelNorthY - (topH <= 10 ? 1.5 : topH / 2);
     };
 
     const makeGeo = (fp: [number, number][], topH: number, depth: number) => {
@@ -206,30 +207,62 @@ function VolumeGuide({ pts, 층수 }: { pts: [number, number][]; 층수: number 
 }
 
 // ── 정북일조 필수 이격 표시선 ────────────────────────────────────
+// 건축법 시행령 §86: 10m 이하 → 1.5m, 10m 초과 → 높이/2
 function SunLimitLine({ localCoords, totalH }: {
   localCoords: [number, number][]; totalH: number;
 }) {
   const bb = bboxOf(localCoords);
   const northZ = -bb.maxY;
   const x0 = bb.minX, x1 = bb.maxX;
-  const reqD = Math.max(1.5, totalH / 2); // required setback
+  // 10m 이하: 1.5m 고정, 10m 초과: 높이/2
+  const reqD = totalH <= 10 ? 1.5 : totalH / 2;
+  const has사선 = totalH > 10;
 
   return (
     <>
-      {/* Mandatory setback line */}
+      {/* 하단 1.5m 고정 이격선 (10m 이하 구간) */}
       <Line
-        points={[new THREE.Vector3(x0, 0.2, northZ + reqD), new THREE.Vector3(x1, 0.2, northZ + reqD)]}
-        color="#f97316" lineWidth={2} dashed dashScale={3}
+        points={[new THREE.Vector3(x0, 0.2, northZ + 1.5), new THREE.Vector3(x1, 0.2, northZ + 1.5)]}
+        color="#f97316" lineWidth={has사선 ? 1 : 2} dashed dashScale={3}
       />
-      <Html position={[(x0 + x1) / 2, 0.5, northZ + reqD]} center>
-        <div style={{
-          background: "#fff7ed", border: "1px solid #f97316",
-          borderRadius: 4, padding: "2px 6px", fontSize: 10, color: "#c2410c",
-          whiteSpace: "nowrap", fontWeight: 600, boxShadow: "0 1px 3px rgba(0,0,0,.15)"
-        }}>
-          정북일조 {reqD.toFixed(1)}m 필요
-        </div>
-      </Html>
+      {!has사선 && (
+        <Html position={[(x0 + x1) / 2, 0.5, northZ + 1.5]} center>
+          <div style={{
+            background: "#fff7ed", border: "1px solid #f97316",
+            borderRadius: 4, padding: "2px 6px", fontSize: 10, color: "#c2410c",
+            whiteSpace: "nowrap", fontWeight: 600, boxShadow: "0 1px 3px rgba(0,0,0,.15)"
+          }}>
+            정북일조 1.5m (10m↓)
+          </div>
+        </Html>
+      )}
+      {/* 10m 초과 시: 상단 사선 이격선 추가 */}
+      {has사선 && (
+        <>
+          <Line
+            points={[new THREE.Vector3(x0, 0.2, northZ + reqD), new THREE.Vector3(x1, 0.2, northZ + reqD)]}
+            color="#dc2626" lineWidth={2} dashed dashScale={3}
+          />
+          <Html position={[(x0 + x1) / 2, 0.5, northZ + reqD]} center>
+            <div style={{
+              background: "#fef2f2", border: "1px solid #dc2626",
+              borderRadius: 4, padding: "2px 6px", fontSize: 10, color: "#991b1b",
+              whiteSpace: "nowrap", fontWeight: 600, boxShadow: "0 1px 3px rgba(0,0,0,.15)"
+            }}>
+              정북일조 {reqD.toFixed(1)}m (높이÷2)
+            </div>
+          </Html>
+          <Html position={[(x0 + x1) / 2, 0.5, northZ + 1.5 + (reqD - 1.5) / 2]} center>
+            <div style={{
+              background: "#fff7ed", border: "1px solid #f97316",
+              borderRadius: 4, padding: "2px 6px", fontSize: 10, color: "#c2410c",
+              whiteSpace: "nowrap", fontWeight: 600, boxShadow: "0 1px 3px rgba(0,0,0,.15)"
+            }}>
+              ← 1.5m (10m↓)
+            </div>
+          </Html>
+        </>
+      )}
     </>
   );
 }
