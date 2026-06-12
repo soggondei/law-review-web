@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
-import { judgeScaleItems, judgeDesignItems, judgePermitItems, calcAreas, calcParking } from "@/lib/judge";
+import { judgeScaleItems, judgeDesignItems, judgePermitItems, calcAreas, calcParking, type Confidence } from "@/lib/judge";
 import { generateSchedule } from "@/lib/schedule";
 import type { PdfExtractResult } from "@/app/api/pdf-extract/route";
 
@@ -26,7 +26,7 @@ const LandUseMap = dynamic(() => import("@/components/LandUseMap"), {
 
 const PdfExtractPanel = dynamic(() => import("@/components/PdfExtractPanel"), { ssr: false });
 
-type Item = { category: string; 항목: string; 법령: string; 내용: string; 해당여부: string; 설계기준?: string | null; };
+type Item = { category: string; 항목: string; 법령: string; 내용: string; 해당여부: string; 설계기준?: string | null; confidence?: Confidence; };
 
 const USE_LIST: { group: string; items: string[] }[] = [
   { group: "단독주택",          items: ["단독주택", "다중주택", "다가구주택"] },
@@ -155,6 +155,8 @@ function ItemTable({ items }: { items: Item[] }) {
               </td>
               <td className="px-2 py-2 align-top">
                 <span className={`inline-block px-2 py-1 rounded text-[11px] font-medium ${badgeColor(item.해당여부)}`}>{item.해당여부}</span>
+                {item.confidence === "estimated" && <span className="block mt-1 text-[10px] text-amber-600 bg-amber-50 rounded px-1.5 py-0.5">🟡 추정값</span>}
+                {item.confidence === "unverified" && <span className="block mt-1 text-[10px] text-red-500 bg-red-50 rounded px-1.5 py-0.5">🔴 미확인</span>}
               </td>
             </tr>
           ))}
@@ -246,7 +248,7 @@ export default function Home() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showUseSuggestions, setShowUseSuggestions] = useState(false);
-  const [editParams, setEditParams] = useState({ 층수: 0, 대지면적: 0, 건축면적입력: 0, 연면적입력: 0, 지하층: 0, 필로티: false, 높이: 0, 구조: "RC", 북측이격: 0 });
+  const [editParams, setEditParams] = useState({ 층수: 0, 층수직접입력: false, 대지면적: 0, 건축면적입력: 0, 연면적입력: 0, 지하층: 0, 필로티: false, 높이: 0, 구조: "RC", 북측이격: 0 });
   const [notionSaving, setNotionSaving] = useState(false);
   const [notionUrl, setNotionUrl] = useState<string | null>(null);
   const [showFolderPanel, setShowFolderPanel] = useState(false);
@@ -300,8 +302,9 @@ export default function Home() {
       세대수: apiResult.baseData?.세대수 ?? 0,
       북측이격: editParams.북측이격 || undefined,
     });
-    const designItems = judgeDesignItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 기타지구, 높이: editParams.높이 || undefined, 구조: editParams.구조, 시도: siNm });
-    const permitItems = judgePermitItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 기타지구, 시도: siNm, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 지목: apiResult.baseData?.지목 ?? "", 교육환경구역: apiResult.baseData?.교육환경구역 ?? null });
+    const 층수추정 = !editParams.층수직접입력;
+    const designItems = judgeDesignItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 기타지구, 높이: editParams.높이 || undefined, 구조: editParams.구조, 시도: siNm, 층수추정 });
+    const permitItems = judgePermitItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 기타지구, 시도: siNm, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 층수추정, 지목: apiResult.baseData?.지목 ?? "", 교육환경구역: apiResult.baseData?.교육환경구역 ?? null });
     const { schedule: scheduleItems, totalMonths: scheduleTotalMonths } = generateSchedule({
       용도: apiResult.용도 || "", 연면적: 계획연면적, 층수, 대지면적,
       지하굴착깊이: 지하층 * 4, 기타지구, 시도: siNm,
@@ -350,6 +353,7 @@ export default function Home() {
       setApiResult(data);
       setEditParams({
         층수: data.추정층수 || 0,
+        층수직접입력: false,
         대지면적: data.baseData?.대지면적 || 0,
         지하층: data.지하층 || 0,
         필로티: false,
@@ -790,10 +794,10 @@ export default function Home() {
               <div>
                 <div className="text-[10px] text-gray-500 mb-1">지상층수</div>
                 <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden bg-white">
-                  <button onClick={() => setEditParams(p => ({ ...p, 층수: Math.max(1, p.층수 - 1) }))}
+                  <button onClick={() => setEditParams(p => ({ ...p, 층수: Math.max(1, p.층수 - 1), 층수직접입력: true }))}
                     className="px-2 py-1.5 text-gray-600 hover:bg-gray-100 text-[14px]">−</button>
                   <span className="px-2 py-1.5 text-[13px] font-semibold text-gray-900 min-w-[36px] text-center">{editParams.층수}층</span>
-                  <button onClick={() => setEditParams(p => ({ ...p, 층수: p.층수 + 1 }))}
+                  <button onClick={() => setEditParams(p => ({ ...p, 층수: p.층수 + 1, 층수직접입력: true }))}
                     className="px-2 py-1.5 text-gray-600 hover:bg-gray-100 text-[14px]">+</button>
                 </div>
               </div>
@@ -861,7 +865,7 @@ export default function Home() {
                   className="border border-gray-300 rounded-lg px-2 py-1.5 text-[13px] text-gray-900 w-20 bg-white focus:outline-none focus:border-blue-400" />
               </div>
               {(editParams.층수 !== r.추정층수 || editParams.대지면적 !== r.baseData?.대지면적 || editParams.건축면적입력 > 0 || editParams.연면적입력 > 0 || editParams.지하층 !== r.지하층 || editParams.필로티 || editParams.높이 > 0 || editParams.구조 !== "RC") && (
-                <button onClick={() => setEditParams({ 층수: r.추정층수 || 0, 대지면적: r.baseData?.대지면적 || 0, 건축면적입력: 0, 연면적입력: 0, 지하층: r.지하층 || 0, 필로티: false, 높이: 0, 구조: r.baseData?.구조 ?? "RC", 북측이격: 0 })}
+                <button onClick={() => setEditParams({ 층수: r.추정층수 || 0, 층수직접입력: false, 대지면적: r.baseData?.대지면적 || 0, 건축면적입력: 0, 연면적입력: 0, 지하층: r.지하층 || 0, 필로티: false, 높이: 0, 구조: r.baseData?.구조 ?? "RC", 북측이격: 0 })}
                   className="text-[11px] text-gray-400 hover:text-gray-600 underline self-end pb-1.5">초기화</button>
               )}
             </div>

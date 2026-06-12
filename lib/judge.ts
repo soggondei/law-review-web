@@ -200,6 +200,8 @@ const PARKING_ORDINANCES: Record<string, ParkingOrdinance> = {
   },
 };
 
+export type Confidence = "confirmed" | "estimated" | "unverified";
+
 type LawReviewItem = {
   category: string;
   항목: string;
@@ -207,6 +209,7 @@ type LawReviewItem = {
   내용: string;
   해당여부: string;
   설계기준?: string | null;
+  confidence?: Confidence;
 };
 
 type PermitReviewItem = {
@@ -215,7 +218,14 @@ type PermitReviewItem = {
   내용: string;
   해당여부: string;
   비고?: string | null;
+  confidence?: Confidence;
 };
+
+function resolveConf(item: { confidence?: Confidence; 해당여부: string }): Confidence {
+  if (item.해당여부.startsWith("⚠️") || item.해당여부.includes("판단불가")) return "unverified";
+  if (item.해당여부.startsWith("❌") || item.해당여부.startsWith("— ")) return "confirmed";
+  return item.confidence ?? "confirmed";
+}
 
 const W = (s: string) => `⚠️ ${s}`;
 const N = "❌ 해당없음";
@@ -468,9 +478,12 @@ export function judgeScaleItems(params: {
   최대건축면적?: number; 최대연면적?: number;
   세대수?: number;
   북측이격?: number;
+  층수추정?: boolean;
+  조례확인?: boolean;
 }) {
   const { 대지면적: 대지, 연면적: 면, 용도, 용도지역: 지역, 기타지구,
-          건폐율, 용적률, 최대건축면적, 최대연면적, 세대수: 세대 = 0, 북측이격 } = params;
+          건폐율, 용적률, 최대건축면적, 최대연면적, 세대수: 세대 = 0, 북측이격,
+          층수추정 = false, 조례확인 = true } = params;
   const items: LawReviewItem[] = [];
   const hasSiteArea = isPositive(대지);
   const hasTotalArea = isPositive(면);
@@ -481,6 +494,7 @@ export function judgeScaleItems(params: {
       ? `법정 최대 건폐율 **${건폐율}%** 이하 → **최대 건축면적 ${최대건축면적}㎡**`
       : "용도지역, 조례 기준, 대지면적이 모두 확인되어야 최대 건축면적 산정 가능",
     해당여부: 건폐율 && hasSiteArea && isPositive(최대건축면적) ? "✅ 의무" : W("판단불가 — 용도지역/대지면적 확인 필요"),
+    confidence: 건폐율 && hasSiteArea && isPositive(최대건축면적) ? (조례확인 ? "confirmed" : "estimated") : undefined,
   });
   items.push({
     category:"나", 항목:"용적률", 법령:"국토계획법 시행령 제85조, 지자체 조례",
@@ -488,6 +502,7 @@ export function judgeScaleItems(params: {
       ? `법정 최대 용적률 **${용적률}%** 이하 → **최대 연면적 ${최대연면적}㎡**`
       : "용도지역, 조례 기준, 대지면적이 모두 확인되어야 최대 연면적 산정 가능",
     해당여부: 용적률 && hasSiteArea && isPositive(최대연면적) ? "✅ 의무" : W("판단불가 — 용도지역/대지면적 확인 필요"),
+    confidence: 용적률 && hasSiteArea && isPositive(최대연면적) ? (조례확인 ? "confirmed" : "estimated") : undefined,
   });
 
   const sb = getSetback(용도);
@@ -541,6 +556,7 @@ export function judgeScaleItems(params: {
     설계기준: 주거지역 && 북측이격 && 북측이격 > 0
       ? `북측 경계 이격 ${북측이격}m 기준. 도로·공원 인접 시 반대편 경계까지 합산 가능`
       : undefined,
+    confidence: 주거지역 && 북측이격 && 북측이격 > 0 ? "estimated" : undefined,
   });
 
   const 대로접속 = hasTotalArea && 면 >= 2000;
@@ -675,7 +691,7 @@ export function judgeScaleItems(params: {
     해당여부: 소음환경용도 ? "⚠️ 인접 소음원 확인 및 방음 설계 검토 권고" : N,
     설계기준:"도로·철도 인접: 방음벽·이중창·환기장치. 공동주택 세대 내 외부소음 기준 확인" });
 
-  return items;
+  return items.map(item => ({ ...item, confidence: resolveConf(item) }));
 }
 
 // ── Section 3: 설계사항 ──────────────────────────────────────────────────────
@@ -694,11 +710,14 @@ function 추정높이(용도: string, 층수: number): number {
 export function judgeDesignItems(params: {
   연면적: number; 층수: number; 용도: string; 대지면적: number;
   지하층?: number; 세대수?: number; 기타지구?: string[];
-  높이?: number;   // 직접 입력한 건축물 높이(m)
-  구조?: string;   // RC / 철골 / 목조 / 조적
+  높이?: number;
+  구조?: string;
   시도?: string;
+  층수추정?: boolean;
+  구조출처?: "대장확인" | "추정" | "미확인";
 }) {
-  const { 연면적: 면, 층수: 층, 용도, 지하층 = 0, 세대수 = 0, 기타지구 = [], 높이: 높이입력, 구조 = "RC", 시도 = "" } = params;
+  const { 연면적: 면, 층수: 층, 용도, 지하층 = 0, 세대수 = 0, 기타지구 = [], 높이: 높이입력, 구조 = "RC", 시도 = "",
+          층수추정 = false, 구조출처 = "추정" } = params;
   const hasTotalArea = isPositive(면);
   const hasFloors = isPositive(층);
   const 높이 = 높이입력 ?? 추정높이(용도, 층);  // 미입력 시 용도별 층고로 추정
@@ -726,27 +745,28 @@ export function judgeDesignItems(params: {
     설계기준: parkingCount !== null ? `일반 2.5m×5.0m, 장애인 3.3m×5.0m${복합용도 ? ". 복합용도 시 용도별 면적 배분 후 합산 산정" : ""} / ${pk?.근거}` : pk?.근거 ?? null });
 
   const 계단2개 = hasTotalArea && hasFloors && (면 >= 1000 || (공동주택 && 층 >= 5));
+  const cf층수 = 층수추정 ? "estimated" : "confirmed";
   items.push({ category:"다", 항목:"직통계단", 법령:"건축법 시행령 제34조",
     내용:`모든 거실 → 직통계단 보행거리 **30m 이하** (내화+불연: **50m**). ${계단2개 ? "**2개소 이상** 의무" : "1개소 이상"}`,
     해당여부: !hasTotalArea || !hasFloors ? W("판단불가 — 연면적/층수 확인 필요") : Y(계단2개 ? "직통계단 2개소 이상 (보행거리 30m↓)" : "직통계단 1개소 이상 (보행거리 30m↓)"),
-    설계기준:"내화구조+불연재료 시 50m까지 완화" });
+    설계기준:"내화구조+불연재료 시 50m까지 완화", confidence: cf층수 });
 
   const 피난계단해당 = hasFloors && (층 >= 5 || 지하층 >= 2);
   items.push({ category:"다", 항목:"피난계단", 법령:"건축법 시행령 제35조",
     내용:"**5층 이상** 또는 **지하 2층 이하**: 피난계단 또는 특별피난계단",
     해당여부: !hasFloors ? W("판단불가 — 층수 확인 필요") : 피난계단해당 ? Y(`피난계단 설치${지하층 >= 2 ? " (지하층 포함)" : ""} — 방화문·전실·계단실 방화구획`) : N,
-    설계기준: 피난계단해당 ? "방화문 60분↑, 전실 또는 옥외 발코니 경유, 계단실 방화구획" : null });
+    설계기준: 피난계단해당 ? "방화문 60분↑, 전실 또는 옥외 발코니 경유, 계단실 방화구획" : null, confidence: cf층수 });
 
   const 특별피난해당 = hasFloors && (층 >= 11 || 지하층 >= 3);
   items.push({ category:"다", 항목:"특별피난계단", 법령:"건축법 시행령 제35조",
     내용:"**11층 이상** 또는 **지하 3층 이하**: 특별피난계단 설치 의무",
     해당여부: !hasFloors ? W("판단불가 — 층수 확인 필요") : 특별피난해당 ? Y(`특별피난계단 설치${지하층 >= 3 ? " (지하층 포함)" : ""} — 전실+배연+연기차단`) : N,
-    설계기준: 특별피난해당 ? "전실(부속실) 필수, 배연설비, 연기차단 구조" : null });
+    설계기준: 특별피난해당 ? "전실(부속실) 필수, 배연설비, 연기차단 구조" : null, confidence: cf층수 });
 
   items.push({ category:"라", 항목:"방화구획", 법령:"건축법 시행령 제46조",
     내용:"내화구조 건축물: 10층↓ **1,000㎡**, 11층↑ **200㎡**마다 방화구획. 스프링클러 시 3배 완화",
     해당여부: !hasTotalArea ? W("판단불가 — 연면적 확인 필요") : 면 >= 200 ? Y(`${층 >= 11 ? "200㎡" : "1,000㎡"}마다 방화구획`) : N,
-    설계기준: 면 >= 200 ? "내화구조 바닥·벽, 갑종방화문(60분). 관통부: 방화댐퍼" : null });
+    설계기준: 면 >= 200 ? "내화구조 바닥·벽, 갑종방화문(60분). 관통부: 방화댐퍼" : null, confidence: cf층수 });
 
   const 경계벽 = 공동주택 || 용도.includes("오피스텔") || 용도.includes("숙박") || 용도.includes("의료");
   items.push({ category:"마", 항목:"경계벽·칸막이벽", 법령:"건축법 시행령 제53조",
@@ -787,25 +807,25 @@ export function judgeDesignItems(params: {
     items.push({ category:"사", 항목:"스프링클러", 법령:"소방시설법 시행령 별표4",
       내용:"11층 이상, 공동주택 6층 이상, 노유자시설, 숙박형 수련시설, 지하층 포함 1,000㎡ 이상 판매·업무·의료·문화집회 용도, 지하층 포함 복합건축물 5,000㎡ 이상 등: 스프링클러 설치 검토",
       해당여부: 스프링클러사유.length > 0 ? Y(`스프링클러 설치: ${스프링클러사유.join(", ")}`) : W("판단불가 — 지하층/연면적/복합용도 기준 확인 필요"),
-      설계기준:"설치 시 방화구획 3배 완화 가능. 특정소방대상물 세부 용도와 층별 바닥면적은 소방 협의로 재확인" });
+      설계기준:"설치 시 방화구획 3배 완화 가능. 특정소방대상물 세부 용도와 층별 바닥면적은 소방 협의로 재확인", confidence: cf층수 });
   }
 
   items.push({ category:"아", 항목:"승용 승강기", 법령:"건축법 시행령 제89조",
     내용:"**6층↑**: 승용 승강기 의무. 연면적 3,000㎡ 초과 시 추가",
     해당여부: !hasFloors ? W("판단불가 — 층수 확인 필요") : 층 >= 6 ? Y(`승용 승강기 ${Math.max(1, Math.ceil((면-3000)/3000)+1)}대↑ (장애인용 1대 포함)`) : N,
-    설계기준: 층 >= 6 ? "기본 1대 + 3,000㎡ 초과분 3,000㎡마다 1대 추가" : null });
+    설계기준: 층 >= 6 ? "기본 1대 + 3,000㎡ 초과분 3,000㎡마다 1대 추가" : null, confidence: cf층수 });
 
   const 비상용해당 = 높이입력 ? 높이 > 31 : hasFloors && 층 >= 10;
   items.push({ category:"아", 항목:"비상용 승강기", 법령:"건축법 시행령 제90조",
     내용:`높이 **31m 초과** (현재: ${높이표시}): 비상용 승강기 의무`,
     해당여부: !높이입력 && !hasFloors ? W("판단불가 — 높이 또는 층수 확인 필요") : 비상용해당 ? Y("비상용 승강기 (승강장 방화구획·배연·예비전원)") : N,
-    설계기준: 비상용해당 ? "승강장: 방화구획, 배연설비, 예비전원. 소방대 전용 조작 가능" : null });
+    설계기준: 비상용해당 ? "승강장: 방화구획, 배연설비, 예비전원. 소방대 전용 조작 가능" : null, confidence: cf층수 });
 
   const 피난용해당 = 층 >= 30 || (높이입력 ? 높이 >= 120 : false);
   if (피난용해당) items.push({ category:"아", 항목:"피난용 승강기", 법령:"건축법 시행령 제90조의3",
     내용:`**30층↑** 또는 높이 **120m↑** (현재: ${높이표시}): 피난용 승강기 설치 의무`,
     해당여부: Y("피난용 승강기 설치 (전실 6㎡↑·예비전원)"),
-    설계기준:"승강장 전실 6㎡↑, 내화구조, 예비전원, 상시 개방 방화문" });
+    설계기준:"승강장 전실 6㎡↑, 내화구조, 예비전원, 상시 개방 방화문", confidence: cf층수 });
 
   const 내화 = (hasFloors && 층 >= 3) || (hasTotalArea && 면 >= 200);
   const 내화설계기준 = !내화 ? null
@@ -1093,17 +1113,18 @@ export function judgeDesignItems(params: {
     해당여부: Y("전기·가스·냉난방 에너지원별 계측장치"),
     설계기준:"원격검침 가능 전자식 계량기. 운영데이터 5년 보존. BEMS 연동 권장" });
 
-  return items;
+  return items.map(item => ({ ...item, confidence: resolveConf(item) }));
 }
 
 // ── Section 4: 인허가·심의 ──────────────────────────────────────────────────
 export function judgePermitItems(params: {
   연면적: number; 층수: number; 용도: string;
   대지면적: number; 세대수?: number; 기타지구?: string[]; 시도?: string; 지하층?: number;
+  층수추정?: boolean;
   지목?: string;
   교육환경구역?: { 구역명: string; 시도: string; 시군구: string } | null;
 }) {
-  const { 연면적: 면, 층수: 층, 용도, 대지면적: 대지, 세대수 = 0, 시도 = "", 지하층 = 0, 지목 = "", 교육환경구역 } = params;
+  const { 연면적: 면, 층수: 층, 용도, 대지면적: 대지, 세대수 = 0, 시도 = "", 지하층 = 0, 층수추정 = false, 지목 = "", 교육환경구역 } = params;
   const 서울 = 시도.includes("서울");
   const Y = "✅ 해당", N = "— 미해당", C = "⚠️ 확인 필요";
   const items: PermitReviewItem[] = [];
@@ -1247,7 +1268,7 @@ export function judgePermitItems(params: {
 
   p("공동주택 하자담보책임","주택법 제46조·제48조","공동주택 시공사: 사용검사 후 **하자담보책임** (구조부 10년, 마감 1~3년). 하자보증 의무",공동주택permit&&세대수>=30?Y:N,"공동주택 하자분쟁조정위원회 / 하자보수보증금 예치 또는 하자이행보증서 제출");
 
-  return items;
+  return items.map(item => ({ ...item, confidence: resolveConf(item) }));
 }
 
 // ── 면적 계산 ────────────────────────────────────────────────────────────────
