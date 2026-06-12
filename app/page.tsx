@@ -470,6 +470,28 @@ export default function Home() {
     finally { setLawCheckLoading(false); }
   }
 
+  const [cadLoading, setCadLoading] = useState(false);
+
+  async function handleCadDownload() {
+    if (!r?.coords?.lat || !r?.coords?.lng) return;
+    setCadLoading(true);
+    try {
+      const params = new URLSearchParams({
+        lat: String(r.coords.lat),
+        lng: String(r.coords.lng),
+        addr: address,
+      });
+      const res = await fetch(`/api/cadexport?${params}`);
+      if (!res.ok) { alert("CAD 생성 실패"); return; }
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `지적도_${address.slice(0, 15)}.dxf`;
+      a.click();
+    } catch { alert("CAD 다운로드 오류"); }
+    finally { setCadLoading(false); }
+  }
+
   async function handleDownload() {
     if (!apiResult || !computed) return;
     const res = await fetch("/api/docx", {
@@ -510,6 +532,11 @@ export default function Home() {
         {r && computed && (
           <div className="flex items-center gap-2">
             <button onClick={handleDownload} className="bg-[#2E75B6] text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-[#1F4E79] transition-colors">📄 DOCX</button>
+            {r?.coords?.lat && (
+              <button onClick={handleCadDownload} disabled={cadLoading} className="bg-[#4E7B3C] text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-[#3A5C2C] disabled:opacity-60 transition-colors">
+                {cadLoading ? "생성 중…" : "📐 CAD"}
+              </button>
+            )}
             <button onClick={openFolderPanel} disabled={notionSaving} className="bg-black text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-gray-800 disabled:opacity-60 transition-colors">
               {notionSaving ? "저장 중…" : "🗒 Notion"}
             </button>
