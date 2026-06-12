@@ -2,7 +2,11 @@ export const preferredRegion = ["icn1"];
 import { NextRequest, NextResponse } from "next/server";
 import https from "https";
 
-const OVERPASS_HOST = "overpass-api.de";
+const OVERPASS_HOSTS = [
+  "overpass-api.de",
+  "overpass.kumi.systems",
+  "z.overpass-api.de",
+];
 const M_PER_LAT = 111320;
 
 const ROAD_WIDTHS: Record<string, number> = {
@@ -19,16 +23,17 @@ export interface ContextRoad {
   width: number;
 }
 
-function httpsPost(body: string): Promise<string> {
+function httpsPost(host: string, body: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const options = {
-      hostname: OVERPASS_HOST,
+      hostname: host,
       path: "/api/interpreter",
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "Content-Length": Buffer.byteLength(body),
-        "User-Agent": "Mozilla/5.0 (compatible; law-review-bot/1.0)",
+        "User-Agent": "law-review-web/1.0 (contact:soggon@naver.com)",
+        "Accept": "application/json",
       },
     };
     const req = https.request(options, (res) => {
@@ -47,6 +52,18 @@ function httpsPost(body: string): Promise<string> {
     req.write(body);
     req.end();
   });
+}
+
+async function httpsPostWithFallback(body: string): Promise<string> {
+  let lastErr: Error | null = null;
+  for (const host of OVERPASS_HOSTS) {
+    try {
+      return await httpsPost(host, body);
+    } catch (e: any) {
+      lastErr = e;
+    }
+  }
+  throw lastErr ?? new Error("Overpass unreachable");
 }
 
 export async function GET(req: NextRequest) {
@@ -68,7 +85,7 @@ export async function GET(req: NextRequest) {
     `out geom;`;
 
   try {
-    const text = await httpsPost("data=" + encodeURIComponent(query));
+    const text = await httpsPostWithFallback("data=" + encodeURIComponent(query));
     const data = JSON.parse(text);
     const elements: any[] = data.elements ?? [];
 

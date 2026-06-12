@@ -385,7 +385,10 @@ export default function Home() {
         fetch(`/api/context?lat=${data.coords.lat}&lng=${data.coords.lng}`)
           .then(r => r.json())
           .then(d => {
-            if (d.error) return;
+            if (d.error) {
+              setSurroundings({ buildings: [], roads: [] });
+              return;
+            }
             // ── 대지 형상: 조회 좌표를 포함하는 건물 폴리곤을 찾아 사용
             const siteBldg = d.buildings.find((b: { coords: [number,number][] }) =>
               pipTest([0, 0], b.coords)
@@ -401,13 +404,23 @@ export default function Home() {
                 bboxAspect: (Math.max(...xs) - Math.min(...xs)) / Math.max(Math.max(...ys) - Math.min(...ys), 0.1),
               });
               setSiteFromOSM(true);
-              // 대지 건물은 주변 건물 목록에서 제외
-              setSurroundings({ ...d, buildings: d.buildings.filter((b: unknown) => b !== siteBldg) });
+              // 대지 건물은 주변 건물 목록에서 제외하고 좌표를 parcel 기준으로 통일
+              const offsetBldgs = d.buildings
+                .filter((b: unknown) => b !== siteBldg)
+                .map((b: { coords: [number,number][]; height: number }) => ({
+                  ...b,
+                  coords: b.coords.map(([x, y]: [number,number]) => [x - cx, y - cy] as [number,number]),
+                }));
+              const offsetRoads = d.roads.map((r: { coords: [number,number][]; width: number }) => ({
+                ...r,
+                coords: r.coords.map(([x, y]: [number,number]) => [x - cx, y - cy] as [number,number]),
+              }));
+              setSurroundings({ buildings: offsetBldgs, roads: offsetRoads });
             } else {
               setSurroundings(d);
             }
           })
-          .catch(() => {});
+          .catch(() => { setSurroundings({ buildings: [], roads: [] }); });
       }
     } catch (e: any) {
       setError(e.message);
