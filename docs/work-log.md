@@ -5,6 +5,44 @@
 
 ---
 
+## [2026-06-12] 3D 주변 건물/도로 미표시 수정 — Claude Code
+
+### 작업 범위
+`app/api/context/route.ts` + `app/page.tsx` — Overpass API 폴백 및 좌표 오프셋 버그 수정
+
+### 원인 분석
+1. **Overpass 406**: `overpass-api.de`가 Vercel 클라우드 서버 IP를 차단 (요청빈도 초과 또는 User-Agent 문제).
+   `app/api/context`가 `{ error: "Overpass 406" }` 반환 → `page.tsx`에서 `if (d.error) return;`으로 `setSurroundings` 미호출
+2. **좌표 불일치**: OSM에서 `siteBldg` 발견 시 parcel 좌표는 `[cx,cy]` 만큼 재중심화했지만, 주변 건물/도로는 원래 좌표 그대로 → 3D 뷰에서 수십m 이격 표시
+3. **에러 무시**: `.catch(() => {})` 로 모든 에러 삼킴 → "주변 현황 불러오는 중…" 무한 표시
+
+### 변경 내용
+
+**`app/api/context/route.ts`**
+- Overpass 미러 3개 폴백: `overpass-api.de` → `overpass.kumi.systems` → `z.overpass-api.de`
+- `httpsPostWithFallback()` 함수 추가 — 각 호스트 순차 시도, 마지막 에러 rethrow
+- User-Agent 변경: `Mozilla/5.0...` → `law-review-web/1.0 (contact:soggon@naver.com)`
+  (Overpass 정책 준수: 앱 식별 정보 포함 필수)
+
+**`app/page.tsx`**
+- `siteBldg` 발견 시 주변 건물/도로에도 `[-cx, -cy]` 오프셋 적용
+  ```js
+  coords: b.coords.map(([x, y]) => [x - cx, y - cy])
+  ```
+- Overpass 에러 시 `setSurroundings({ buildings: [], roads: [] })` 호출 (빈 데이터로 로딩 해제)
+- `.catch` 에서도 동일하게 빈 surroundings 설정
+
+### 배포
+- `7be6302` → Vercel 자동배포 (약 3분 소요)
+- 프로덕션: https://law-review-web.vercel.app
+
+### Codex에게
+- `app/api/context/route.ts`는 OSM/Overpass 연동 전용 파일 — 직접 수정 시 Claude Code에 요청
+- 만약 Overpass 미러도 차단되면 `OVERPASS_HOSTS` 배열에 다른 미러 추가 (`overpass.openstreetmap.fr` 등)
+- `app/page.tsx` 수정 금지 (기존 규칙)
+
+---
+
 ## [2026-06-12] 2컬럼 레이아웃 복원 — Claude Code
 
 ### 작업 범위
