@@ -26,7 +26,8 @@ const LandUseMap = dynamic(() => import("@/components/LandUseMap"), {
 
 const PdfExtractPanel = dynamic(() => import("@/components/PdfExtractPanel"), { ssr: false });
 
-type Item = { category: string; 항목: string; 법령: string; 내용: string; 해당여부: string; 설계기준?: string | null; };
+type Confidence = "confirmed" | "estimated" | "unverified" | "user_input";
+type Item = { category: string; 항목: string; 법령: string; 내용: string; 해당여부: string; 설계기준?: string | null; confidence?: Confidence; };
 
 const USE_LIST: { group: string; items: string[] }[] = [
   { group: "단독주택",          items: ["단독주택", "다중주택", "다가구주택"] },
@@ -60,6 +61,17 @@ function badgeColor(val: string) {
   if (val.startsWith("⚠️")) return "bg-yellow-50 text-yellow-700 border border-yellow-200";
   if (val.startsWith("❌")) return "bg-gray-50 text-gray-400 border border-gray-200";
   return "bg-blue-50 text-blue-700 border border-blue-200";
+}
+
+function confidenceBadge(confidence?: Confidence) {
+  const map: Record<Confidence, { label: string; cls: string }> = {
+    confirmed: { label: "확인", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+    estimated: { label: "추정", cls: "bg-yellow-50 text-yellow-700 border-yellow-200" },
+    unverified: { label: "미확인", cls: "bg-red-50 text-red-700 border-red-200" },
+    user_input: { label: "직접입력", cls: "bg-purple-50 text-purple-700 border-purple-200" },
+  };
+  const item = map[confidence ?? "unverified"];
+  return <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${item.cls}`}>{item.label}</span>;
 }
 
 function Accordion({ title, badge, children }: { title: string; badge?: string; children: React.ReactNode }) {
@@ -144,7 +156,10 @@ function ItemTable({ items }: { items: Item[] }) {
             <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
               <td className="px-3 py-2 bg-blue-50/50 border-r border-gray-100 align-top">
                 <div className="text-[10px] text-blue-500">{item.category}.</div>
-                <div className="font-medium text-slate-700">{item.항목}</div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium text-slate-700">{item.항목}</span>
+                  {confidenceBadge(item.confidence)}
+                </div>
                 <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">
                   {(() => { const url = getLawUrl(item.법령); return url ? <a href={url} target="_blank" rel="noreferrer" className="hover:text-blue-500 hover:underline">{item.법령} ↗</a> : item.법령; })()}
                 </div>
@@ -292,6 +307,10 @@ export default function Home() {
       : 최대연면적;
     const 건폐율초과 = 건축면적v > 0 && !!areas && 건축면적v > areas.최대건축면적;
     const 용적률초과 = 연면적v > 0 && 연면적v > 최대연면적;
+    const 기본구조 = apiResult.baseData?.구조 || "RC";
+    const 구조출처 = editParams.구조 !== 기본구조
+      ? "사용자입력"
+      : apiResult.baseData?.구조정보?.source ?? "미확인";
     const scaleItems = judgeScaleItems({
       대지면적, 연면적: 계획연면적, 층수,
       용도: apiResult.용도 || "", 용도지역: zoneName || "", 기타지구,
@@ -300,7 +319,14 @@ export default function Home() {
       세대수: apiResult.baseData?.세대수 ?? 0,
       북측이격: editParams.북측이격 || undefined,
     });
-    const designItems = judgeDesignItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 기타지구, 높이: editParams.높이 || undefined, 구조: editParams.구조, 시도: siNm });
+    const designItems = judgeDesignItems({
+      연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 지하층,
+      세대수: apiResult.baseData?.세대수 ?? 0, 기타지구,
+      높이: editParams.높이 || undefined,
+      구조: editParams.구조,
+      구조출처,
+      시도: siNm,
+    });
     const permitItems = judgePermitItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 기타지구, 시도: siNm, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 지목: apiResult.baseData?.지목 ?? "", 교육환경구역: apiResult.baseData?.교육환경구역 ?? null });
     const { schedule: scheduleItems, totalMonths: scheduleTotalMonths } = generateSchedule({
       용도: apiResult.용도 || "", 연면적: 계획연면적, 층수, 대지면적,
@@ -329,6 +355,7 @@ export default function Home() {
             내용: `복합용도 용도별 합산 → 최소 **${총}대** (장애인 **${장애인}면**)\n${details.map(d => `· ${d.용도} ${d.면적}㎡: ${d.대수}대 (${d.근거})`).join("\n")}`,
             해당여부: `✅ 합산 ${총}대, 장애인 ${장애인}면 이상`,
             설계기준: "용도별 면적 배분 재산정. 일반 2.5m×5.0m, 장애인 3.3m×5.0m",
+            confidence: "user_input",
           };
         }
       }
@@ -846,12 +873,22 @@ export default function Home() {
                   className="border border-gray-300 rounded-lg px-2 py-1.5 text-[13px] text-gray-900 w-20 bg-white focus:outline-none focus:border-blue-400" />
               </div>
               <div>
-                <div className="text-[10px] text-gray-500 mb-1">구조</div>
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-[10px] text-gray-500">구조</span>
+                  {confidenceBadge(
+                    editParams.구조 !== (r.baseData?.구조 || "RC")
+                      ? "user_input"
+                      : r.baseData?.구조정보?.source === "대장확인"
+                        ? "confirmed"
+                        : "unverified"
+                  )}
+                </div>
                 <select value={editParams.구조}
                   onChange={e => setEditParams(p => ({ ...p, 구조: e.target.value }))}
                   className="border border-gray-300 rounded-lg px-2 py-1.5 text-[13px] text-gray-900 bg-white focus:outline-none focus:border-blue-400">
                   {["RC", "철골", "목조", "조적"].map(v => <option key={v}>{v}</option>)}
                 </select>
+                {r.baseData?.구조정보?.source === "미확인" && <div className="text-[10px] text-red-500 mt-0.5">대장 구조 미확인</div>}
               </div>
               <div>
                 <div className="text-[10px] text-gray-500 mb-1">북측이격 (m)</div>
@@ -860,7 +897,7 @@ export default function Home() {
                   placeholder="미입력"
                   className="border border-gray-300 rounded-lg px-2 py-1.5 text-[13px] text-gray-900 w-20 bg-white focus:outline-none focus:border-blue-400" />
               </div>
-              {(editParams.층수 !== r.추정층수 || editParams.대지면적 !== r.baseData?.대지면적 || editParams.건축면적입력 > 0 || editParams.연면적입력 > 0 || editParams.지하층 !== r.지하층 || editParams.필로티 || editParams.높이 > 0 || editParams.구조 !== "RC") && (
+              {(editParams.층수 !== r.추정층수 || editParams.대지면적 !== r.baseData?.대지면적 || editParams.건축면적입력 > 0 || editParams.연면적입력 > 0 || editParams.지하층 !== r.지하층 || editParams.필로티 || editParams.높이 > 0 || editParams.구조 !== (r.baseData?.구조 || "RC") || editParams.북측이격 > 0) && (
                 <button onClick={() => setEditParams({ 층수: r.추정층수 || 0, 대지면적: r.baseData?.대지면적 || 0, 건축면적입력: 0, 연면적입력: 0, 지하층: r.지하층 || 0, 필로티: false, 높이: 0, 구조: r.baseData?.구조 ?? "RC", 북측이격: 0 })}
                   className="text-[11px] text-gray-400 hover:text-gray-600 underline self-end pb-1.5">초기화</button>
               )}
@@ -1139,7 +1176,10 @@ export default function Home() {
                     {computed.permitItems.map((item: any, i: number) => (
                       <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
                         <td className="px-3 py-2 bg-blue-50/50 border-r border-gray-100 align-top">
-                          <div className="font-medium text-slate-700">{item.항목}</div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium text-slate-700">{item.항목}</span>
+                            {confidenceBadge(item.confidence)}
+                          </div>
                           {item.법령 && <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">{(() => { const url = getLawUrl(item.법령); return url ? <a href={url} target="_blank" rel="noreferrer" className="hover:text-blue-500 hover:underline">{item.법령} ↗</a> : item.법령; })()}</div>}
                         </td>
                         <td className="px-3 py-2 text-gray-600">{item.내용}{item.비고 && <span className="block text-[11px] text-blue-500">↳ {item.비고}</span>}</td>

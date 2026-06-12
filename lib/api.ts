@@ -8,6 +8,9 @@ const BLDRGST_KEY = process.env.BLDG_KEY!;
 const LAW_OC      = process.env.LAW_OC!;
 const LAW_BASE    = "https://www.law.go.kr/DRF";
 
+type StructureSource = "대장확인" | "추정" | "미확인";
+type StructureInfo = { value: string; source: StructureSource; raw?: string | null };
+
 // ── 도로명주소 ────────────────────────────────────────────────────────────────
 export async function fetchAddressInfo(keyword: string) {
   const params = new URLSearchParams({
@@ -41,6 +44,15 @@ export async function fetchAddressInfo(keyword: string) {
   };
 }
 
+function parseStrctCode(cdNm: string | null | undefined): StructureInfo {
+  if (!cdNm) return { value: "", source: "미확인", raw: cdNm ?? null };
+  if (cdNm.includes("철근콘크리트") || cdNm.includes("RC") || cdNm.includes("PC")) return { value: "RC", source: "대장확인", raw: cdNm };
+  if (cdNm.includes("철골") || cdNm.includes("강구조")) return { value: "철골", source: "대장확인", raw: cdNm };
+  if (cdNm.includes("목구조") || cdNm.includes("목조")) return { value: "목조", source: "대장확인", raw: cdNm };
+  if (cdNm.includes("조적") || cdNm.includes("벽돌") || cdNm.includes("블록")) return { value: "조적", source: "대장확인", raw: cdNm };
+  return { value: "", source: "미확인", raw: cdNm };
+}
+
 // ── 건축물대장 ────────────────────────────────────────────────────────────────
 export async function fetchBuildingInfo(sigunguCd: string, bjdongCd: string, bun: string, ji: string) {
   const params = new URLSearchParams({
@@ -58,8 +70,11 @@ export async function fetchBuildingInfo(sigunguCd: string, bjdongCd: string, bun
       대지면적:  parseFloat(it.platArea) || null,
       연면적:    parseFloat(it.totArea) || null,
       층수:      parseInt(it.grndFlrCnt) || null,
+      지하층수:  parseInt(it.ugrndFlrCnt) || null,
       주용도:    it.mainPurpsCdNm ?? null,
       준공일:    it.useAprDay ? String(it.useAprDay) : null,
+      세대수:    parseInt(it.hhldCnt) || null,
+      구조:      parseStrctCode(it.strctCdNm),
     };
   } catch { return null; }
 }
@@ -181,7 +196,14 @@ export async function fetchZoneRates(zoneName: string) {
 }
 
 // ── 지자체별 조례 건폐율·용적률 ───────────────────────────────────────────────
-type ZoneRate = { 건폐율: number; 용적률: number };
+type ZoneRate = {
+  건폐율: number;
+  용적률: number;
+  근거?: string;
+  sourceUrl?: string;
+  confidence?: "confirmed" | "unverified";
+  note?: string;
+};
 type OrdinanceDB = Record<string, ZoneRate>;
 
 const ORDINANCES: Record<string, OrdinanceDB> = {
@@ -250,12 +272,50 @@ const ORDINANCES: Record<string, OrdinanceDB> = {
     "자연녹지지역":      { 건폐율:20, 용적률:100 },
     "계획관리지역":      { 건폐율:40, 용적률:100 },
   },
+  "대전광역시": {},
+  "울산광역시": {},
+  "세종특별자치시": {},
+  "강원특별자치도": {},
+  "충청북도": {},
+  "충청남도": {},
+  "전북특별자치도": {},
+  "전라북도": {},
+  "전라남도": {},
+  "경상북도": {},
+  "경상남도": {},
+  "제주특별자치도": {},
 };
+
+const REGION_ALIASES: Record<string, string[]> = {
+  "서울특별시": ["서울", "서울특별시"],
+  "부산광역시": ["부산", "부산광역시"],
+  "인천광역시": ["인천", "인천광역시"],
+  "대구광역시": ["대구", "대구광역시"],
+  "광주광역시": ["광주", "광주광역시"],
+  "대전광역시": ["대전", "대전광역시"],
+  "울산광역시": ["울산", "울산광역시"],
+  "세종특별자치시": ["세종", "세종특별자치시"],
+  "경기도": ["경기", "경기도"],
+  "강원특별자치도": ["강원", "강원특별자치도"],
+  "충청북도": ["충북", "충청북도"],
+  "충청남도": ["충남", "충청남도"],
+  "전북특별자치도": ["전북", "전북특별자치도"],
+  "전라북도": ["전북", "전라북도"],
+  "전라남도": ["전남", "전라남도"],
+  "경상북도": ["경북", "경상북도"],
+  "경상남도": ["경남", "경상남도"],
+  "제주특별자치도": ["제주", "제주특별자치도"],
+};
+
+function findOrdinanceRegion(siNm: string) {
+  return Object.keys(ORDINANCES).find(region =>
+    REGION_ALIASES[region]?.some(alias => siNm.includes(alias))
+  );
+}
 
 /** 시도명 + 용도지역으로 조례 건폐율·용적률 반환. 없으면 null */
 export function getOrdinanceRates(siNm: string, zoneName: string): ZoneRate | null {
-  // 시도명 정규화
-  const key = Object.keys(ORDINANCES).find(k => siNm.includes(k.replace("특별시","").replace("광역시","").replace("도","")));
+  const key = findOrdinanceRegion(siNm);
   const db = key ? ORDINANCES[key] : null;
   return db?.[zoneName] ?? null;
 }

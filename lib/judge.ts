@@ -1,203 +1,31 @@
 /**
  * 5대 분류 판단 함수 (기존 fetch-laws.js에서 이식)
  */
+import parkingOrdinancesData from "@/lib/data/parking-ordinances.json";
+
 
 // ── 주차장 기준 ───────────────────────────────────────────────────────────────
+export type Confidence = "confirmed" | "estimated" | "unverified" | "user_input";
 type ParkingRounding = "ceil" | "half-up";
-type ParkingAreaRule = { per: number; 근거: string; note?: string; rounding?: ParkingRounding };
-type ParkingUnitRule = { perUnit: number; 근거: string; note?: string };
+type ParkingRuleMeta = { sourceUrl?: string; effectiveDate?: string; confidence?: Confidence };
+type ParkingAreaRule = { per: number; 근거: string; note?: string; rounding?: ParkingRounding } & ParkingRuleMeta;
+type ParkingUnitRule = { perUnit: number; 근거: string; note?: string } & ParkingRuleMeta;
 type ParkingOrdinance = {
   area: Record<string, ParkingAreaRule>;
   unit: Record<string, ParkingUnitRule>;
   disabled?: { minTotal: number; rate: number; 근거: string };
+  sourceUrl?: string;
+  effectiveDate?: string;
+  confidence: Confidence;
+  note?: string;
 };
 type ParkingOptions = {
   오피스텔전용면적?: number;
 };
 
-const PARKING_ORDINANCES: Record<string, ParkingOrdinance> = {
-  "서울특별시": {
-    area: {
-      "단독주택":       { per: 50,  근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "다가구주택":     { per: 50,  근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "근린생활시설":   { per: 134, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2", note: "제1종 일부 및 제2종 근린생활시설 등 세부 예외 확인", rounding: "half-up" },
-      "업무시설":       { per: 150, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "판매시설":       { per: 150, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "의료시설":       { per: 134, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "숙박시설":       { per: 134, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "교육연구":       { per: 200, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "문화집회":       { per: 150, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-    },
-    unit: {
-      "아파트":     { perUnit: 1.0, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "연립주택":   { perUnit: 0.8, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "다세대주택": { perUnit: 0.7, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "기숙사":     { perUnit: 0.3, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-    },
-    disabled: { minTotal: 10, rate: 0.03, 근거: "장애인등편의법 및 지자체 실무 기준 확인 필요" },
-  },
-  "부산광역시": {
-    area: {
-      "위락시설":       { per: 67,  근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "문화집회":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "종교시설":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "판매시설":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "운수시설":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "의료시설":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "운동시설":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "업무시설":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "장례식장":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "근린생활시설":   { per: 134, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", note: "제1종 일부 및 제2종 근린생활시설, 숙박시설", rounding: "half-up" },
-      "숙박시설":       { per: 134, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "수련시설":       { per: 350, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "공장":           { per: 350, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "창고시설":       { per: 400, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "기숙사":         { per: 400, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "데이터센터":     { per: 400, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "기타":           { per: 200, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-    },
-    unit: {
-      "아파트":     { perUnit: 1.0, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7" },
-      "연립주택":   { perUnit: 0.8, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7" },
-      "다세대주택": { perUnit: 0.7, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7" },
-    },
-    disabled: { minTotal: 10, rate: 0.03, 근거: "부산광역시 주차장 설치 및 관리 조례 및 장애인등편의법 기준" },
-  },
-  "인천광역시": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "인천광역시 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "인천광역시 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.6, 근거: "인천광역시 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "인천광역시 주차장 설치 및 관리 조례" },
-    },
-  },
-  "대구광역시": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "대구광역시 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "대구광역시 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.6, 근거: "대구광역시 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "대구광역시 주차장 설치 및 관리 조례" },
-    },
-  },
-  "광주광역시": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "광주광역시 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "광주광역시 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "광주광역시 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "광주광역시 주차장 설치 및 관리 조례" },
-    },
-  },
-  "대전광역시": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "대전광역시 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "대전광역시 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "대전광역시 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "대전광역시 주차장 설치 및 관리 조례" },
-    },
-  },
-  "울산광역시": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.9, 근거: "울산광역시 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.7, 근거: "울산광역시 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.6, 근거: "울산광역시 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "울산광역시 주차장 설치 및 관리 조례" },
-    },
-  },
-  "세종특별자치시": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 1.0, 근거: "세종특별자치시 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.7, 근거: "세종특별자치시 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.6, 근거: "세종특별자치시 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "세종특별자치시 주차장 설치 및 관리 조례" },
-    },
-  },
-  "경기도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "경기도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "경기도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "경기도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "경기도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "강원특별자치도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "강원특별자치도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "강원특별자치도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "강원특별자치도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "강원특별자치도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "충청북도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.7, 근거: "충청북도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "충청북도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "충청북도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "충청북도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "충청남도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.7, 근거: "충청남도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "충청남도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "충청남도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "충청남도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "전라북도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.7, 근거: "전라북도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "전라북도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "전라북도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "전라북도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "전라남도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.7, 근거: "전라남도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "전라남도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "전라남도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "전라남도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "경상북도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "경상북도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "경상북도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "경상북도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "경상북도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "경상남도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "경상남도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.7, 근거: "경상남도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.6, 근거: "경상남도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "경상남도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "제주특별자치도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 1.0, 근거: "제주특별자치도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.7, 근거: "제주특별자치도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.6, 근거: "제주특별자치도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "제주특별자치도 주차장 설치 및 관리 조례" },
-    },
-  },
+type ParkingOrdinanceJson = Omit<ParkingOrdinance, "area"> & {
+  area?: Record<string, ParkingAreaRule>;
+  areaPreset?: "nationalLawArea";
 };
 
 type LawReviewItem = {
@@ -207,6 +35,7 @@ type LawReviewItem = {
   내용: string;
   해당여부: string;
   설계기준?: string | null;
+  confidence?: Confidence;
 };
 
 type PermitReviewItem = {
@@ -215,6 +44,7 @@ type PermitReviewItem = {
   내용: string;
   해당여부: string;
   비고?: string | null;
+  confidence?: Confidence;
 };
 
 const W = (s: string) => `⚠️ ${s}`;
@@ -224,24 +54,72 @@ const isPositive = (value: unknown): value is number =>
 
 function nationalLawArea(): Record<string, ParkingAreaRule> {
   const note = "조례 미확인 — 법정 기준 잠정 적용";
+  const confidence: Confidence = "unverified";
   return {
-    "단독주택":       { per: 50,  근거: "주차장법 시행령 별표1", note },
-    "다가구주택":     { per: 50,  근거: "주차장법 시행령 별표1", note },
-    "근린생활시설":   { per: 134, 근거: "주차장법 시행령 별표1", note },
-    "업무시설":       { per: 150, 근거: "주차장법 시행령 별표1", note },
-    "판매시설":       { per: 150, 근거: "주차장법 시행령 별표1", note },
-    "의료시설":       { per: 134, 근거: "주차장법 시행령 별표1", note },
-    "숙박시설":       { per: 200, 근거: "주차장법 시행령 별표1", note },
-    "교육연구":       { per: 200, 근거: "주차장법 시행령 별표1", note },
-    "문화집회":       { per: 100, 근거: "주차장법 시행령 별표1", note },
-    "공장":           { per: 350, 근거: "주차장법 시행령 별표1", note },
-    "창고시설":       { per: 350, 근거: "주차장법 시행령 별표1", note },
+    "단독주택":       { per: 50,  근거: "주차장법 시행령 별표1", note, confidence },
+    "다가구주택":     { per: 50,  근거: "주차장법 시행령 별표1", note, confidence },
+    "근린생활시설":   { per: 134, 근거: "주차장법 시행령 별표1", note, confidence },
+    "업무시설":       { per: 150, 근거: "주차장법 시행령 별표1", note, confidence },
+    "판매시설":       { per: 150, 근거: "주차장법 시행령 별표1", note, confidence },
+    "의료시설":       { per: 134, 근거: "주차장법 시행령 별표1", note, confidence },
+    "숙박시설":       { per: 200, 근거: "주차장법 시행령 별표1", note, confidence },
+    "교육연구":       { per: 200, 근거: "주차장법 시행령 별표1", note, confidence },
+    "문화집회":       { per: 100, 근거: "주차장법 시행령 별표1", note, confidence },
+    "공장":           { per: 350, 근거: "주차장법 시행령 별표1", note, confidence },
+    "창고시설":       { per: 350, 근거: "주차장법 시행령 별표1", note, confidence },
   };
+}
+
+function normalizeParkingOrdinances(db: Record<string, ParkingOrdinanceJson>): Record<string, ParkingOrdinance> {
+  return Object.fromEntries(
+    Object.entries(db).map(([key, ordinance]) => [
+      key,
+      {
+        ...ordinance,
+        area: ordinance.area ?? (ordinance.areaPreset === "nationalLawArea" ? nationalLawArea() : {}),
+      },
+    ])
+  );
+}
+
+const PARKING_ORDINANCES = normalizeParkingOrdinances(parkingOrdinancesData as Record<string, ParkingOrdinanceJson>);
+
+const PARKING_REGION_ALIASES: Record<string, string[]> = {
+  "서울특별시": ["서울", "서울특별시"],
+  "부산광역시": ["부산", "부산광역시"],
+  "인천광역시": ["인천", "인천광역시"],
+  "대구광역시": ["대구", "대구광역시"],
+  "광주광역시": ["광주", "광주광역시"],
+  "대전광역시": ["대전", "대전광역시"],
+  "울산광역시": ["울산", "울산광역시"],
+  "세종특별자치시": ["세종", "세종특별자치시"],
+  "경기도": ["경기", "경기도"],
+  "강원특별자치도": ["강원", "강원특별자치도"],
+  "충청북도": ["충북", "충청북도"],
+  "충청남도": ["충남", "충청남도"],
+  "전북특별자치도": ["전북", "전북특별자치도", "전라북도"],
+  "전라남도": ["전남", "전라남도"],
+  "경상북도": ["경북", "경상북도"],
+  "경상남도": ["경남", "경상남도"],
+  "제주특별자치도": ["제주", "제주특별자치도"],
+};
+
+function inferConfidence(item: { 해당여부?: string; 내용?: string; 설계기준?: string | null; 비고?: string | null; confidence?: Confidence }): Confidence {
+  if (item.confidence) return item.confidence;
+  const text = `${item.해당여부 ?? ""} ${item.내용 ?? ""} ${item.설계기준 ?? ""} ${item.비고 ?? ""}`;
+  if (text.includes("직접입력") || text.includes("수정됨")) return "user_input";
+  if (text.includes("판단불가") || text.includes("확인 필요") || text.includes("미확인") || text.includes("조례 미확인")) return "unverified";
+  if (text.includes("추정") || text.includes("약 ")) return "estimated";
+  return "confirmed";
+}
+
+function withConfidence<T extends { confidence?: Confidence; 해당여부?: string; 내용?: string; 설계기준?: string | null; 비고?: string | null }>(items: T[]): (T & { confidence: Confidence })[] {
+  return items.map(item => ({ ...item, confidence: inferConfidence(item) }));
 }
 
 function getParkingOrdinance(siNm = "") {
   const key = Object.keys(PARKING_ORDINANCES).find(k =>
-    siNm.includes(k) || siNm.includes(k.replace("특별시", "").replace("광역시", "").replace("특별자치시", "").replace("특별자치도", "").replace("도", ""))
+    PARKING_REGION_ALIASES[k]?.some(alias => siNm.includes(alias))
   );
   return key ? { key, ordinance: PARKING_ORDINANCES[key] } : null;
 }
@@ -267,11 +145,14 @@ export function calcParking(용도: string, 연면적: number, 세대수 = 0, si
     return {
       대수: null,
       기준: "해당 지자체 조례 기준 미등록",
-      근거: "지자체 주차장 설치 및 관리 조례 확인 필요",
+      근거: "지자체 주차장 설치 및 관리 조례 별표 확인 필요",
       판단불가: true,
+      confidence: "unverified" as Confidence,
     };
   }
   const rules = local.ordinance;
+  const ordinanceNote = rules.note ? ` / ${rules.note}` : "";
+  const ordinanceConfidence = rules.confidence;
 
   if (용도.includes("오피스텔")) {
     const 오피스텔전용면적 = options.오피스텔전용면적;
@@ -286,6 +167,7 @@ export function calcParking(용도: string, 연면적: number, 세대수 = 0, si
         : "오피스텔 전용면적 미입력 — 보수 기준(전용 30㎡ 초과, 120㎡당 1대) 적용",
       근거: "주차장법 시행령 별표1 제1호 나목",
       판단불가: !hasExclusiveArea,
+      confidence: hasExclusiveArea ? "user_input" as Confidence : "unverified" as Confidence,
     };
   }
 
@@ -300,14 +182,22 @@ export function calcParking(용도: string, 연면적: number, 세대수 = 0, si
           대수: 적용대수,
           장애인대수: getDisabledParkingCount(적용대수, rules),
           기준: `세대당 ${std.perUnit}대 × ${세대수}세대 = ${세대기준대수}대 (면적기준 ${면적기준대수}대, 큰 값 적용)`,
-          근거: `${std.근거} (${local.key})`,
+          근거: `${std.근거} (${local.key})${ordinanceNote}`,
+          판단불가: ordinanceConfidence === "unverified",
+          confidence: std.confidence ?? ordinanceConfidence,
+          sourceUrl: std.sourceUrl ?? rules.sourceUrl,
+          effectiveDate: std.effectiveDate ?? rules.effectiveDate,
         };
       }
       return {
         대수: 면적기준대수,
         장애인대수: getDisabledParkingCount(면적기준대수, rules),
         기준: `연면적 75㎡당 1대 (세대수 입력 시 세대당 기준 적용)`,
-        근거: `${std.근거} (${local.key})`,
+        근거: `${std.근거} (${local.key})${ordinanceNote}`,
+        판단불가: ordinanceConfidence === "unverified",
+        confidence: std.confidence ?? ordinanceConfidence,
+        sourceUrl: std.sourceUrl ?? rules.sourceUrl,
+        effectiveDate: std.effectiveDate ?? rules.effectiveDate,
       };
     }
   }
@@ -318,15 +208,20 @@ export function calcParking(용도: string, 연면적: number, 세대수 = 0, si
         대수,
         장애인대수: getDisabledParkingCount(대수, rules),
         기준: `연면적 ${std.per}㎡당 1대${std.note ? ` (${std.note})` : ""}`,
-        근거: `${std.근거} (${local.key})`,
+        근거: `${std.근거} (${local.key})${ordinanceNote}`,
+        판단불가: (std.confidence ?? ordinanceConfidence) === "unverified",
+        confidence: std.confidence ?? ordinanceConfidence,
+        sourceUrl: std.sourceUrl ?? rules.sourceUrl,
+        effectiveDate: std.effectiveDate ?? rules.effectiveDate,
       };
     }
   }
   return {
     대수: null,
     기준: "해당 용도 주차 기준 미등록",
-    근거: `${local.key} 주차장 설치 및 관리 조례 확인 필요`,
+    근거: `${local.key} 주차장 설치 및 관리 조례 별표 확인 필요`,
     판단불가: true,
+    confidence: "unverified" as Confidence,
   };
 }
 
@@ -460,6 +355,41 @@ function getSetback(용도: string) {
   return { 건축선: 2.0, 인접대지: 1.0, 근거: "건축법 시행령 제80조의2" };
 }
 
+export function estimateNorthSunReference(params: { 용도지역: string; 북측이격?: number }) {
+  const { 용도지역: 지역, 북측이격 } = params;
+  const 주거지역 = 지역.includes("주거");
+  if (!주거지역) {
+    return {
+      applies: false,
+      내용: "채광창 방향 기준 사선제한. 가로구역별 최고높이 우선",
+      설계기준: "비주거지역은 정북일조 외 높이제한·채광창 방향 이격 기준 확인",
+      confidence: "unverified" as Confidence,
+    };
+  }
+
+  const 법령구조 = "건축법 시행령 제86조는 높이 10m 이하 구간의 절대 이격과 10m 초과 구간의 사선 이격을 조례 범위 안에서 나누어 적용";
+  if (!isPositive(북측이격)) {
+    return {
+      applies: true,
+      내용: `전용·일반 주거지역: 정북 방향 일조제한 적용. ${법령구조}`,
+      설계기준: "북측 인접대지경계선, 도로·공원·하천 접도 예외, 관할 조례 기준 확인 필요",
+      confidence: "unverified" as Confidence,
+    };
+  }
+
+  const 배율 = 지역.includes("전용주거") || 지역.includes("1종일반") ? 2 : 4;
+  const 가산 = 지역.includes("전용주거") || 지역.includes("1종일반") ? 0
+    : 지역.includes("2종일반") ? 4 : 8;
+  const 참고허용높이 = Math.round((북측이격 * 배율 + 가산) * 10) / 10;
+  return {
+    applies: true,
+    참고허용높이,
+    내용: `정북 방향 인접 경계까지 ${북측이격}m → 개략 참고 높이 약 ${참고허용높이}m. ${법령구조}`,
+    설계기준: "현재 값은 개략치 — 관할 구청 확인 필요. 도로·공원·하천 접한 경우 반대편 경계까지 합산되는 예외는 별도 검토",
+    confidence: "estimated" as Confidence,
+  };
+}
+
 // ── Section 2: 규모 ──────────────────────────────────────────────────────────
 export function judgeScaleItems(params: {
   대지면적: number; 연면적: number; 층수: number;
@@ -522,25 +452,15 @@ export function judgeScaleItems(params: {
   });
 
   const 주거지역 = 지역.includes("주거");
-  let 일조내용 = 주거지역
-    ? "전용·일반 주거지역: 정북 방향 **1:2 사선제한** 및 이격거리 기준 적용"
-    : "채광창 방향 기준 사선제한. 가로구역별 최고높이 우선";
-  if (주거지역 && 북측이격 && 북측이격 > 0) {
-    const 배율 = 지역.includes("전용주거") || 지역.includes("1종일반") ? 2 : 4;
-    const 가산 = 지역.includes("전용주거") || 지역.includes("1종일반") ? 0
-      : 지역.includes("2종일반") ? 4 : 8;
-    const 최대허용높이 = Math.round((북측이격 * 배율 + 가산) * 10) / 10;
-    일조내용 = `정북 방향 인접 경계까지 **${북측이격}m** → 최대 허용 높이 **${최대허용높이}m** (${지역} 1:${배율} 사선제한)`;
-  }
+  const 일조참고 = estimateNorthSunReference({ 용도지역: 지역, 북측이격 });
   items.push({
     category:"사", 항목:"일조제한", 법령:"건축법 제61조, 시행령 제86조",
-    내용: 일조내용,
+    내용: 일조참고.내용,
     해당여부: 주거지역 && 북측이격 && 북측이격 > 0
-      ? `✅ 정북 ${북측이격}m 기준 최대 허용 높이 산정 완료`
+      ? `⚠️ 정북 ${북측이격}m 기준 참고값 산정`
       : "✅ 의무",
-    설계기준: 주거지역 && 북측이격 && 북측이격 > 0
-      ? `북측 경계 이격 ${북측이격}m 기준. 도로·공원 인접 시 반대편 경계까지 합산 가능`
-      : undefined,
+    설계기준: 일조참고.설계기준,
+    confidence: 일조참고.confidence,
   });
 
   const 대로접속 = hasTotalArea && 면 >= 2000;
@@ -675,7 +595,7 @@ export function judgeScaleItems(params: {
     해당여부: 소음환경용도 ? "⚠️ 인접 소음원 확인 및 방음 설계 검토 권고" : N,
     설계기준:"도로·철도 인접: 방음벽·이중창·환기장치. 공동주택 세대 내 외부소음 기준 확인" });
 
-  return items;
+  return withConfidence(items);
 }
 
 // ── Section 3: 설계사항 ──────────────────────────────────────────────────────
@@ -696,9 +616,10 @@ export function judgeDesignItems(params: {
   지하층?: number; 세대수?: number; 기타지구?: string[];
   높이?: number;   // 직접 입력한 건축물 높이(m)
   구조?: string;   // RC / 철골 / 목조 / 조적
+  구조출처?: "대장확인" | "추정" | "미확인" | "사용자입력";
   시도?: string;
 }) {
-  const { 연면적: 면, 층수: 층, 용도, 지하층 = 0, 세대수 = 0, 기타지구 = [], 높이: 높이입력, 구조 = "RC", 시도 = "" } = params;
+  const { 연면적: 면, 층수: 층, 용도, 지하층 = 0, 세대수 = 0, 기타지구 = [], 높이: 높이입력, 구조 = "RC", 구조출처 = "추정", 시도 = "" } = params;
   const hasTotalArea = isPositive(면);
   const hasFloors = isPositive(층);
   const 높이 = 높이입력 ?? 추정높이(용도, 층);  // 미입력 시 용도별 층고로 추정
@@ -723,7 +644,8 @@ export function judgeDesignItems(params: {
       ? `**${용도}** ${면}㎡ → 최소 **${parkingCount}대** (${pk?.근거}). **장애인 ${장애인수}면** 이상${복합용도 ? " ⚠️ 복합용도: 용도별 면적 배분 후 각 기준 재산정 필요" : ""}`
       : "용도와 연면적이 확인되어야 부설주차장 대수 산정 가능",
     해당여부: parkingCount !== null && !pk?.판단불가 ? Y(`일반 ${parkingCount}대, 장애인 ${장애인수}면 이상`) : W(pk?.기준 ?? "판단불가 — 용도/연면적/지자체 조례 확인 필요"),
-    설계기준: parkingCount !== null ? `일반 2.5m×5.0m, 장애인 3.3m×5.0m${복합용도 ? ". 복합용도 시 용도별 면적 배분 후 합산 산정" : ""} / ${pk?.근거}` : pk?.근거 ?? null });
+    설계기준: parkingCount !== null ? `일반 2.5m×5.0m, 장애인 3.3m×5.0m${복합용도 ? ". 복합용도 시 용도별 면적 배분 후 합산 산정" : ""} / ${pk?.근거}` : pk?.근거 ?? null,
+    confidence: pk?.confidence ?? inferConfidence({ 해당여부: pk?.기준 ?? "" }) });
 
   const 계단2개 = hasTotalArea && hasFloors && (면 >= 1000 || (공동주택 && 층 >= 5));
   items.push({ category:"다", 항목:"직통계단", 법령:"건축법 시행령 제34조",
@@ -783,11 +705,13 @@ export function judgeDesignItems(params: {
     지하층대형용도 ? "지하층 포함 1,000㎡ 이상 판매·업무·의료·문화집회 용도" : null,
     지하포함복합건축물 ? "지하층 포함 복합건축물 5,000㎡ 이상" : null,
   ].filter((v): v is string => Boolean(v));
-  if (스프링클러사유.length > 0 || (!hasTotalArea && (지하층 >= 1 || 복합용도))) {
+  const 스프링클러정보부족 = !hasFloors || (!hasTotalArea && (지하층 >= 1 || 복합용도 || 지하층스프링클러용도));
+  if (스프링클러사유.length > 0 || 스프링클러정보부족) {
     items.push({ category:"사", 항목:"스프링클러", 법령:"소방시설법 시행령 별표4",
       내용:"11층 이상, 공동주택 6층 이상, 노유자시설, 숙박형 수련시설, 지하층 포함 1,000㎡ 이상 판매·업무·의료·문화집회 용도, 지하층 포함 복합건축물 5,000㎡ 이상 등: 스프링클러 설치 검토",
       해당여부: 스프링클러사유.length > 0 ? Y(`스프링클러 설치: ${스프링클러사유.join(", ")}`) : W("판단불가 — 지하층/연면적/복합용도 기준 확인 필요"),
-      설계기준:"설치 시 방화구획 3배 완화 가능. 특정소방대상물 세부 용도와 층별 바닥면적은 소방 협의로 재확인" });
+      설계기준:`조건별 사유: ${스프링클러사유.length ? 스프링클러사유.join(" / ") : "면적·층수 정보 부족"}. 설치 시 방화구획 3배 완화 가능. 특정소방대상물 세부 용도와 층별 바닥면적은 소방 협의로 재확인`,
+      confidence: 스프링클러사유.length > 0 ? "confirmed" : "unverified" });
   }
 
   items.push({ category:"아", 항목:"승용 승강기", 법령:"건축법 시행령 제89조",
@@ -814,9 +738,10 @@ export function judgeDesignItems(params: {
     : 구조 === "조적"  ? "조적: 내화성능 두께 기준 (벽돌 1.0B↑). 구조계산서 확인"
     : "RC조: 기둥 20㎝↑·보 10㎝↑·바닥 15㎝↑. 구조형식에 따라 국토부 고시 기준 확인";
   items.push({ category:"자", 항목:"내화구조", 법령:"건축법 제50조, 시행령 제56조",
-    내용:`**3층↑** 또는 연면적 **200㎡↑**: 주요구조부(기둥·보·바닥·벽) 내화구조 의무 (구조: ${구조})`,
+    내용:`**3층↑** 또는 연면적 **200㎡↑**: 주요구조부(기둥·보·바닥·벽) 내화구조 의무 (구조: ${구조}, 출처: ${구조출처})`,
     해당여부: !hasTotalArea || !hasFloors ? W("판단불가 — 연면적/층수 확인 필요") : 내화 ? Y("주요구조부 내화구조 의무 (기둥·보·바닥·벽)") : N,
-    설계기준: 내화설계기준 });
+    설계기준: 구조출처 === "미확인" ? "구조 미확인 — 건축물대장 또는 구조도서 확인 전까지 내화구조 세부기준 확정 금지" : 내화설계기준,
+    confidence: 구조출처 === "대장확인" ? "confirmed" : 구조출처 === "사용자입력" ? "user_input" : 구조출처 === "미확인" ? "unverified" : "estimated" });
 
   // 장애인 편의시설 (간략화)
   const 장애인기준: Record<string, number> = { "근린생활": 300, "의료": 500, "업무": 500, "판매": 500, "문화집회": 500 };
@@ -1093,7 +1018,7 @@ export function judgeDesignItems(params: {
     해당여부: Y("전기·가스·냉난방 에너지원별 계측장치"),
     설계기준:"원격검침 가능 전자식 계량기. 운영데이터 5년 보존. BEMS 연동 권장" });
 
-  return items;
+  return withConfidence(items);
 }
 
 // ── Section 4: 인허가·심의 ──────────────────────────────────────────────────
@@ -1108,8 +1033,8 @@ export function judgePermitItems(params: {
   const Y = "✅ 해당", N = "— 미해당", C = "⚠️ 확인 필요";
   const items: PermitReviewItem[] = [];
 
-  const p = (항목: string, 법령: string, 내용: string, 해당여부: string, 비고?: string | null) =>
-    items.push({ 항목, 법령, 내용: 내용.replace(/\*\*/g,""), 해당여부, 비고: 비고||null });
+  const p = (항목: string, 법령: string, 내용: string, 해당여부: string, 비고?: string | null, confidence?: Confidence) =>
+    items.push({ 항목, 법령, 내용: 내용.replace(/\*\*/g,""), 해당여부, 비고: 비고||null, confidence });
 
   p("개발행위허가","국토계획법 제56조","도시지역 건축물 신축: 개발행위허가 필요. 건축허가와 일괄처리 여부 확인",C,"건축허가 시 의제 처리 여부 확인");
   p("건축 인허가","건축법 제11조·제14조", 면<200&&층<3 ? "연면적 200㎡ 미만 + 3층 미만: 신고 대상" : "건축허가 대상 (관할 구청 건축과)", Y);
@@ -1213,11 +1138,13 @@ export function judgePermitItems(params: {
   const 농지지목 = ["전", "답", "과수원"].includes(지목);
   p("농지전용 협의·허가","농지법 제34조","대지 지목이 전·답·과수원인 경우: 농지전용 허가 또는 협의 의무",
     농지지목 ? `✅ 해당 — 지목이 농지(${지목})` : 지목 ? N : C,
-    농지지목 ? "관할 시·군·구 농정과 / 비농업적 이용 전 반드시 처리. 허가 전 착공 불가" : 지목 ? `현재 지목: ${지목}` : "지목 미확인 — 토지이음 지목 확인 필요");
+    농지지목 ? "관할 시·군·구 농정과 / 비농업적 이용 전 반드시 처리. 허가 전 착공 불가" : 지목 ? `현재 지목: ${지목}` : "지목 미확인 — 토지이음 지목 확인 필요",
+    지목 ? "confirmed" : "unverified");
 
   p("산지전용허가","산지관리법 제14조","대지 지목이 임야(산지)인 경우: 산지전용허가 및 대체산림자원조성비 납부",
     지목 === "임야" ? "✅ 해당 — 지목이 임야" : 지목 ? N : C,
-    지목 === "임야" ? "지방산림청 또는 시·군·구 산림과 / 산지전용허가 및 대체산림자원조성비 확인" : 지목 ? `현재 지목: ${지목}` : "지목 미확인 — 토지이음 지목 확인 필요");
+    지목 === "임야" ? "지방산림청 또는 시·군·구 산림과 / 산지전용허가 및 대체산림자원조성비 확인" : 지목 ? `현재 지목: ${지목}` : "지목 미확인 — 토지이음 지목 확인 필요",
+    지목 ? "confirmed" : "unverified");
 
   p("도로점용허가","도로법 제61조","공사 중 도로 굴착·비계 설치·공사용 가시설로 도로 점용 시: 점용허가 의무",C,"관할 도로관리청(시·군·구 도로과) / 공사 착공 전 취득. 점용료 납부");
 
@@ -1247,7 +1174,7 @@ export function judgePermitItems(params: {
 
   p("공동주택 하자담보책임","주택법 제46조·제48조","공동주택 시공사: 사용검사 후 **하자담보책임** (구조부 10년, 마감 1~3년). 하자보증 의무",공동주택permit&&세대수>=30?Y:N,"공동주택 하자분쟁조정위원회 / 하자보수보증금 예치 또는 하자이행보증서 제출");
 
-  return items;
+  return withConfidence(items);
 }
 
 // ── 면적 계산 ────────────────────────────────────────────────────────────────

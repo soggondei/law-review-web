@@ -56,9 +56,12 @@ export async function POST(req: NextRequest) {
     }
 
     const 지하층 = parseInt(String(지하층입력)) || 0;
-    const 추정층수 = parseInt(층수입력) || areas?.추정층수 || 0;
+    const 층수직접입력 = parseInt(String(층수입력)) > 0;
+    const 추정층수 = parseInt(String(층수입력)) || areas?.추정층수 || 0;
     const 최대연면적 = areas?.최대연면적 ?? 0;
     const 세대수 = parseInt(String(세대수입력)) || 0;
+    const 구조정보 = bldgInfo?.구조 ?? { value: "", source: "미확인" as const, raw: null };
+    const 구조값 = 구조정보.value || "RC";
 
     // 좌표·교육환경보호구역 (판단 전 선조회)
     const coords = await fetchCoordinates(addrInfo.roadAddr ?? address).catch(() => null);
@@ -73,7 +76,11 @@ export async function POST(req: NextRequest) {
       건폐율: effectiveRule?.건폐율, 용적률: effectiveRule?.용적률,
       최대건축면적: areas?.최대건축면적, 최대연면적,
     });
-    const designItems = judgeDesignItems({ 연면적: 최대연면적, 층수: 추정층수, 용도: 용도||"", 대지면적: 대지면적_val, 지하층, 세대수, 기타지구: land.기타지구, 시도: addrInfo.siNm || "" });
+    const designItems = judgeDesignItems({
+      연면적: 최대연면적, 층수: 추정층수, 용도: 용도||"", 대지면적: 대지면적_val,
+      지하층, 세대수, 기타지구: land.기타지구, 구조: 구조값,
+      구조출처: 구조정보.source, 시도: addrInfo.siNm || "",
+    });
     const permitItems = judgePermitItems({
       연면적: 최대연면적, 층수: 추정층수, 용도: 용도||"",
       대지면적: 대지면적_val, 기타지구: land.기타지구, 시도: addrInfo.siNm||"", 지하층, 세대수,
@@ -115,6 +122,7 @@ export async function POST(req: NextRequest) {
       용도, 행위,
       연락처, 시청부서, 구청부서,
       대수선결과,
+      층수직접입력,
       // 클라이언트 재계산에 필요한 고정 데이터
       baseData: {
         대지면적: 대지면적_val,
@@ -126,6 +134,10 @@ export async function POST(req: NextRequest) {
         세대수,
         지목: land.지목,
         교육환경구역: educationZone,
+        구조: 구조값,
+        구조정보,
+        준공일: bldgInfo?.준공일 ?? null,
+        bldg지하층수: bldgInfo?.지하층수 ?? null,
       },
     });
   } catch (e: any) {
