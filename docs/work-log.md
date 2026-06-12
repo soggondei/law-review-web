@@ -5,6 +5,29 @@
 
 ---
 
+## [2026-06-12] 2컬럼 레이아웃 복원 — Claude Code
+
+### 작업 범위
+`app/page.tsx` 레이아웃 복원
+
+### 원인
+Codex 브랜치 머지(`a66d1f8`) 시 Codex의 `page.tsx`(단일컬럼 구버전)가 `app/page.tsx`를 덮어씌움.
+`aside(w-72 sticky)` + `main(flex-1)` 2컬럼 구조가 단일 컬럼으로 롤백됨.
+
+### 복원 방법
+`git checkout 4510e03 -- app/page.tsx` (2컬럼 기반) + 이후 기능 재적용:
+- Confidence 타입 / ItemTable 배지
+- 층수직접입력 editParams 내부 통합
+- judgeDesignItems/permitItems 파라미터 수정 (siNm→시도, 층수추정, 지목)
+- calcParking null-check 개선
+
+### ⚠️ Codex에게 (필독)
+**`app/page.tsx`는 절대 수정 금지.** 레이아웃·UI 로직이 복잡하며, Codex 버전과 충돌 시 레이아웃이 손상됨.
+Codex 작업 범위: `lib/judge.ts`, `lib/api.ts`, `docs/` 만 허용.
+`app/page.tsx`가 필요한 변경은 Claude Code에 이슈로 요청할 것.
+
+---
+
 ## [2026-06-12] 정북일조제한 3D 시뮬레이션 법규 수정 — Claude Code
 
 ### 작업 범위
