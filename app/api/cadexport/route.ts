@@ -42,9 +42,9 @@ function dxfText(layer: string, x: number, y: number, height: number, text: stri
   ].join("\n");
 }
 
-function annotationEntities(addr: string): string[] {
+function annotationEntities(addr: string, radius: number): string[] {
   const ents: string[] = [];
-  const ox = -28, oy = 32; // 좌상단 여백 기준
+  const ox = -28, oy = 32;
 
   // 북방향 화살표 (N↑)
   ents.push(lwPolyline("ANNOTATION", [[ox, oy], [ox, oy + 4]], false));
@@ -63,21 +63,23 @@ function annotationEntities(addr: string): string[] {
   const lx = ox + 5, ly = oy - 5;
   ents.push(dxfText("ANNOTATION", lx, ly,       0.9, "PARCEL    -- 지적 필지 경계 (Vworld)"));
   ents.push(dxfText("ANNOTATION", lx, ly - 1.5, 0.9, "BUILDINGS -- 주변 건물 (OSM)"));
-  ents.push(dxfText("ANNOTATION", lx, ly - 3.0, 0.9, "ROADS     -- 도로 (OSM)"));
+  ents.push(dxfText("ANNOTATION", lx, ly - 3.0, 0.9, "ROADS     -- 차도 (OSM)"));
+  ents.push(dxfText("ANNOTATION", lx, ly - 4.5, 0.9, "SIDEWALK  -- 보도·보행로 (OSM)"));
 
-  // 주소 + 생성일
+  // 주소 + 생성일 + 반경
   const today = new Date().toISOString().slice(0, 10);
-  ents.push(dxfText("ANNOTATION", ox, oy - 12, 1.0, addr));
-  ents.push(dxfText("ANNOTATION", ox, oy - 13.8, 0.8, `생성: ${today}  좌표계: WGS84 로컬(m)`));
+  ents.push(dxfText("ANNOTATION", ox, oy - 14, 1.0, addr));
+  ents.push(dxfText("ANNOTATION", ox, oy - 15.8, 0.8, `생성: ${today}  범위: ${radius}m  좌표계: WGS84 로컬(m)`));
 
   return ents;
 }
 
-function buildDxf(entities: string[], addr: string): string {
+function buildDxf(entities: string[], addr: string, radius: number): string {
   const layers: { name: string; color: number }[] = [
     { name: "PARCEL",     color: 1 },  // red
     { name: "BUILDINGS",  color: 7 },  // white
     { name: "ROADS",      color: 2 },  // yellow
+    { name: "SIDEWALK",   color: 4 },  // cyan
     { name: "ANNOTATION", color: 3 },  // green
   ];
 
@@ -108,7 +110,7 @@ function buildDxf(entities: string[], addr: string): string {
   const entSection = [
     g(0, "SECTION"), g(2, "ENTITIES"),
     ...entities,
-    ...annotationEntities(addr),
+    ...annotationEntities(addr, radius),
     g(0, "ENDSEC"),
     g(0, "EOF"),
   ].join("\n");
@@ -165,23 +167,25 @@ export async function GET(req: NextRequest) {
   const lat = parseFloat(searchParams.get("lat") ?? "0");
   const lng = parseFloat(searchParams.get("lng") ?? "0");
   const addr = searchParams.get("addr") ?? "site";
+  const radius = Math.min(Math.max(parseInt(searchParams.get("radius") ?? "30"), 10), 200);
   if (!lat || !lng) return NextResponse.json({ error: "lat/lng 필요" }, { status: 400 });
 
   const mPerLng = M_PER_LAT * Math.cos((lat * Math.PI) / 180);
-  const radius = 30; // 30m
   const dLat = radius / M_PER_LAT;
   const dLng = radius / mPerLng;
 
   const entities: string[] = [];
 
   // ── 1. Vworld LP_PA_CBND_BUBUN (지적 필지 경계) ──────────────────────────
+  // 반경 클수록 필지 수도 증가 — 최대 200개까지
+  const vwSize = radius <= 30 ? 50 : radius <= 50 ? 100 : 200;
   const vwParams = new URLSearchParams({
     service: "data",
     request: "GetFeature",
     data: "LP_PA_CBND_BUBUN",
     key: VWORLD_KEY,
     domain: "localhost",
-    size: "50",
+    size: String(vwSize),
     page: "1",
     geomFilter: `BOX(${lng - dLng},${lat - dLat},${lng + dLng},${lat + dLat})`,
     crs: "EPSG:4326",
@@ -217,12 +221,16 @@ export async function GET(req: NextRequest) {
     }
   } catch { /* Vworld 실패 시 필지 레이어 생략 */ }
 
-  // ── 2. OSM 주변 건물·도로 (30m radius) ──────────────────────────────────
+  // ── 2. OSM 주변 건물·차도·보도 ───────────────────────────────────────────
+  const SIDEWALK_TAGS = new Set(["footway", "pedestrian", "path", "steps", "cycleway"]);
+  const ROAD_TAGS     = new Set(["primary", "secondary", "tertiary", "residential", "unclassified", "service", "living_street", "trunk", "motorway"]);
+
   const obbox = `${lat - dLat},${lng - dLng},${lat + dLat},${lng + dLng}`;
+  const osmTimeout = radius <= 50 ? 10 : 15;
   const query =
-    `[out:json][timeout:10];` +
+    `[out:json][timeout:${osmTimeout}];` +
     `(way["building"](${obbox});` +
-    `way["highway"~"primary|secondary|tertiary|residential|pedestrian|footway|unclassified|service"](${obbox}););` +
+    `way["highway"~"primary|secondary|tertiary|residential|pedestrian|footway|unclassified|service|living_street|path|steps|cycleway"](${obbox}););` +
     `out geom;`;
 
   try {
@@ -239,19 +247,20 @@ export async function GET(req: NextRequest) {
       );
 
       if (el.tags?.building) {
-        // drop closing point
         const last = localPts[localPts.length - 1];
         const first = localPts[0];
         if (Math.abs(first[0] - last[0]) < 1e-6 && Math.abs(first[1] - last[1]) < 1e-6)
           localPts.pop();
         if (localPts.length >= 2) entities.push(lwPolyline("BUILDINGS", localPts, true));
       } else if (el.tags?.highway) {
-        if (localPts.length >= 2) entities.push(lwPolyline("ROADS", localPts, false));
+        const hw: string = el.tags.highway;
+        const layer = SIDEWALK_TAGS.has(hw) ? "SIDEWALK" : ROAD_TAGS.has(hw) ? "ROADS" : "ROADS";
+        if (localPts.length >= 2) entities.push(lwPolyline(layer, localPts, false));
       }
     }
   } catch { /* OSM 실패 시 주변 레이어 생략 */ }
 
-  const dxf = buildDxf(entities, addr);
+  const dxf = buildDxf(entities, addr, radius);
   const safe = addr.slice(0, 20).replace(/[/\\:*?"<>|]/g, "_");
   const filename = `지적도_${safe}.dxf`;
 

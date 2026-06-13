@@ -538,6 +538,7 @@ export default function Home() {
   }
 
   const [cadLoading, setCadLoading] = useState(false);
+  const [cadRadius, setCadRadius] = useState<30 | 50 | 100>(30);
 
   async function handleCadDownload() {
     if (!r?.coords?.lat || !r?.coords?.lng) return;
@@ -547,13 +548,14 @@ export default function Home() {
         lat: String(r.coords.lat),
         lng: String(r.coords.lng),
         addr: address,
+        radius: String(cadRadius),
       });
       const res = await fetch(`/api/cadexport?${params}`);
       if (!res.ok) { alert("CAD 생성 실패"); return; }
       const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `지적도_${address.slice(0, 15)}.dxf`;
+      a.download = `지적도_${address.slice(0, 15)}_${cadRadius}m.dxf`;
       a.click();
     } catch { alert("CAD 다운로드 오류"); }
     finally { setCadLoading(false); }
@@ -600,9 +602,19 @@ export default function Home() {
           <div className="flex items-center gap-2">
             <button onClick={handleDownload} className="bg-[#2E75B6] text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-[#1F4E79] transition-colors">📄 DOCX</button>
             {r?.coords?.lat && (
-              <button onClick={handleCadDownload} disabled={cadLoading} className="bg-[#4E7B3C] text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-[#3A5C2C] disabled:opacity-60 transition-colors">
-                {cadLoading ? "생성 중…" : "📐 CAD"}
-              </button>
+              <div className="flex items-center gap-1">
+                <div className="flex rounded-lg overflow-hidden border border-[#4E7B3C]">
+                  {([30, 50, 100] as const).map(v => (
+                    <button key={v} onClick={() => setCadRadius(v)}
+                      className={`text-[11px] px-2 py-1.5 font-medium transition-colors ${cadRadius === v ? "bg-[#4E7B3C] text-white" : "bg-white text-[#4E7B3C] hover:bg-green-50"}`}>
+                      {v}m
+                    </button>
+                  ))}
+                </div>
+                <button onClick={handleCadDownload} disabled={cadLoading} className="bg-[#4E7B3C] text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-[#3A5C2C] disabled:opacity-60 transition-colors">
+                  {cadLoading ? "생성 중…" : "📐 CAD"}
+                </button>
+              </div>
             )}
             <button onClick={openFolderPanel} disabled={notionSaving} className="bg-black text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-gray-800 disabled:opacity-60 transition-colors">
               {notionSaving ? "저장 중…" : "🗒 Notion"}
