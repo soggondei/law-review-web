@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import type { MassPreviewData } from "@/app/api/masspreview/route";
+import type { MassPreviewData, TerrainGrid } from "@/app/api/masspreview/route";
 
 // ── 레이어 설정 ────────────────────────────────────────────────────────────────
 
@@ -49,14 +49,14 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
   const cleanupRef = useRef<(() => void) | null>(null);
   const groupsRef  = useRef<Partial<Record<LayerKey, import("three").Group>>>({});
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState<string | null>(null);
-  const [bldCount, setBldCount] = useState(0);
-  const [layers, setLayers]   = useState<Record<LayerKey, boolean>>({
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
+  const [bldCount, setBldCount]   = useState(0);
+  const [elevRange, setElevRange] = useState<{ min: number; max: number } | null>(null);
+  const [layers, setLayers]       = useState<Record<LayerKey, boolean>>({
     BUILDINGS: true, PARCELS: true, ROADS: true, SIDEWALK: true,
   });
 
-  // 레이어 토글 → Three.js 그룹 visibility 직접 변경 (리렌더 없음)
   const toggleLayer = useCallback((key: LayerKey) => {
     setLayers(prev => {
       const next = { ...prev, [key]: !prev[key] };
@@ -66,13 +66,13 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
     });
   }, []);
 
-  // Three.js 씬 구성
   useEffect(() => {
     cleanupRef.current?.();
     cleanupRef.current = null;
     groupsRef.current = {};
     setLoading(true);
     setError(null);
+    setElevRange(null);
 
     let cancelled = false;
 
@@ -87,20 +87,27 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
         const data: MassPreviewData = await res.json();
         if (cancelled || !canvasRef.current) return;
 
+        const terrain = data.terrain;
+        const elevDiff = terrain ? terrain.maxElev - terrain.minElev : 0;
+        if (terrain) setElevRange({ min: terrain.minElev, max: terrain.maxElev });
+
         const W = canvasRef.current.clientWidth  || 680;
         const H = canvasRef.current.clientHeight || 440;
 
         // ── Scene ─────────────────────────────────────────────────
-        const scene    = new THREE.Scene();
+        const scene = new THREE.Scene();
         scene.background = new THREE.Color(0xffffff);
-        // 미세한 안개로 원거리 페이드
         scene.fog = new THREE.FogExp2(0xffffff, 0.004);
 
-        // ── Camera (투시, 좁은 FOV → 아이소메트릭 느낌) ──────────
-        const camera = new THREE.PerspectiveCamera(32, W / H, 0.1, 2000);
-        const d      = radius * 1.8;
-        camera.position.set(d * 0.8, -d * 0.9, d * 0.7);
-        camera.lookAt(0, 0, 0);
+        // ── Camera ────────────────────────────────────────────────
+        const camera = new THREE.PerspectiveCamera(32, W / H, 0.1, 3000);
+        const d  = radius * 1.8;
+        const dz = d * 0.7 + elevDiff * 0.4;
+        const centerElev = terrain
+          ? terrain.grid[Math.floor(terrain.rows / 2)][Math.floor(terrain.cols / 2)] - terrain.minElev
+          : 0;
+        camera.position.set(d * 0.8, -d * 0.9, dz);
+        camera.lookAt(0, 0, centerElev);
 
         // ── Renderer ──────────────────────────────────────────────
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -113,30 +120,74 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
         // ── 조명 ──────────────────────────────────────────────────
         scene.add(new THREE.AmbientLight(0xffffff, 0.75));
         const sun = new THREE.DirectionalLight(0xffffff, 0.9);
-        sun.position.set(radius * 1.2, -radius * 0.5, radius * 2);
+        sun.position.set(radius * 1.2, -radius * 0.5, radius * 2 + elevDiff);
         sun.castShadow = true;
         sun.shadow.mapSize.set(2048, 2048);
         sun.shadow.camera.left   = -radius * 1.5;
         sun.shadow.camera.right  =  radius * 1.5;
         sun.shadow.camera.top    =  radius * 1.5;
         sun.shadow.camera.bottom = -radius * 1.5;
+        sun.shadow.camera.far    = 3000;
         scene.add(sun);
-        // 반사광 (건물 반대면)
         const fill = new THREE.DirectionalLight(0xddeeff, 0.3);
         fill.position.set(-radius, radius * 0.5, radius * 0.5);
         scene.add(fill);
 
-        // ── 지면 그리드 ────────────────────────────────────────────
-        const groundGeo = new THREE.PlaneGeometry(radius * 2, radius * 2);
-        const groundMat = new THREE.MeshLambertMaterial({ color: 0xf8f8f8, side: THREE.DoubleSide });
-        const ground    = new THREE.Mesh(groundGeo, groundMat);
-        ground.receiveShadow = true;
-        scene.add(ground);
+        // ── elevation 보간 함수 ────────────────────────────────────
+        function getZ(localX: number, localY: number): number {
+          if (!terrain) return 0;
+          const gr = (localY / radius + 1) / 2 * (terrain.rows - 1);
+          const gc = (localX / radius + 1) / 2 * (terrain.cols - 1);
+          const r0 = Math.max(0, Math.min(terrain.rows - 2, Math.floor(gr)));
+          const c0 = Math.max(0, Math.min(terrain.cols - 2, Math.floor(gc)));
+          const dr = gr - r0, dc = gc - c0;
+          const e = (
+            terrain.grid[r0][c0]         * (1 - dr) * (1 - dc) +
+            terrain.grid[r0][c0 + 1]     * (1 - dr) * dc +
+            terrain.grid[r0 + 1][c0]     * dr       * (1 - dc) +
+            terrain.grid[r0 + 1][c0 + 1] * dr       * dc
+          );
+          return e - terrain.minElev;
+        }
+
+        // ── 지면 (terrain mesh 또는 flat ground) ──────────────────
+        if (terrain) {
+          const { grid, rows, cols, minElev } = terrain;
+          const tPos: number[] = [], tIdx: number[] = [];
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              const x = ((c / (cols - 1)) * 2 - 1) * radius;
+              const y = ((r / (rows - 1)) * 2 - 1) * radius;
+              tPos.push(x, y, grid[r][c] - minElev);
+            }
+          }
+          for (let r = 0; r < rows - 1; r++) {
+            for (let c = 0; c < cols - 1; c++) {
+              const a = r * cols + c, b = a + 1;
+              const d2 = (r + 1) * cols + c, e = d2 + 1;
+              tIdx.push(a, b, e, a, e, d2);
+            }
+          }
+          const tGeo = new THREE.BufferGeometry();
+          tGeo.setAttribute("position", new THREE.Float32BufferAttribute(tPos, 3));
+          tGeo.setIndex(tIdx);
+          tGeo.computeVertexNormals();
+          const tMesh = new THREE.Mesh(tGeo,
+            new THREE.MeshLambertMaterial({ color: 0xf0efe8, side: THREE.DoubleSide }));
+          tMesh.receiveShadow = true;
+          scene.add(tMesh);
+        } else {
+          const groundGeo = new THREE.PlaneGeometry(radius * 2, radius * 2);
+          const groundMat = new THREE.MeshLambertMaterial({ color: 0xf8f8f8, side: THREE.DoubleSide });
+          const ground    = new THREE.Mesh(groundGeo, groundMat);
+          ground.receiveShadow = true;
+          scene.add(ground);
+        }
 
         // 격자선
         const gridHelper = new THREE.GridHelper(radius * 2, Math.ceil(radius / 5) * 2, 0xcccccc, 0xdddddd);
         gridHelper.rotation.x = Math.PI / 2;
-        gridHelper.position.z  = -0.05;
+        gridHelper.position.z = centerElev - 0.05;
         scene.add(gridHelper);
 
         // ── 헬퍼 함수들 ───────────────────────────────────────────
@@ -148,33 +199,28 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
           edgeHex: number,
           castShadow = false,
         ) {
-          const mat  = new THREE.MeshLambertMaterial({ color: faceHex, side: THREE.DoubleSide });
-          const mesh = new THREE.Mesh(geo, mat);
+          const mesh = new THREE.Mesh(geo,
+            new THREE.MeshLambertMaterial({ color: faceHex, side: THREE.DoubleSide }));
           mesh.castShadow    = castShadow;
           mesh.receiveShadow = true;
           group.add(mesh);
-
-          // 엣지 라인 오버레이
           const edgesGeo = new THREE.EdgesGeometry(geo, 10);
-          const edgeMat  = new THREE.LineBasicMaterial({ color: edgeHex, linewidth: 1 });
-          group.add(new THREE.LineSegments(edgesGeo, edgeMat));
+          group.add(new THREE.LineSegments(edgesGeo,
+            new THREE.LineBasicMaterial({ color: edgeHex, linewidth: 1 })));
         }
 
-        function buildingGeo(pts: [number, number][], h: number) {
+        // 건물 geometry — baseElev를 z 오프셋으로 적용
+        function buildingGeo(pts: [number, number][], h: number, baseElev: number) {
           const pos: number[] = [], idx: number[] = [];
           const n = pts.length;
-          // 바닥
-          for (const [x, y] of pts) pos.push(x, y, 0);
+          for (const [x, y] of pts) pos.push(x, y, baseElev);
           for (let i = 1; i < n - 1; i++) idx.push(0, i + 1, i);
-          // 지붕
           const t = n;
-          for (const [x, y] of pts) pos.push(x, y, h);
+          for (const [x, y] of pts) pos.push(x, y, baseElev + h);
           for (let i = 1; i < n - 1; i++) idx.push(t, t + i, t + i + 1);
-          // 측면
           for (let i = 0; i < n; i++) {
             const j = (i + 1) % n;
-            const a = i, b = j, c = t + i, d = t + j;
-            idx.push(a, b, d, a, d, c);
+            idx.push(i, j, t + j, i, t + j, t + i);
           }
           const geo = new THREE.BufferGeometry();
           geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
@@ -183,9 +229,10 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
           return geo;
         }
 
+        // 필지 geometry — 각 꼭짓점 terrain elevation 적용
         function flatPolyGeo(pts: [number, number][]) {
           const pos: number[] = [], idx: number[] = [];
-          for (const [x, y] of pts) pos.push(x, y, 0);
+          for (const [x, y] of pts) pos.push(x, y, getZ(x, y) + 0.08);
           for (let i = 1; i < pts.length - 1; i++) idx.push(0, i, i + 1);
           const geo = new THREE.BufferGeometry();
           geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
@@ -194,6 +241,7 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
           return geo;
         }
 
+        // 도로 띠 geometry — terrain elevation + 오프셋
         function stripGeo(pts: [number, number][], hw: number) {
           const pos: number[] = [], idx: number[] = [];
           let vi = 0;
@@ -202,7 +250,8 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
             const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
             if (len < 0.01) continue;
             const nx = (-dy / len) * hw, ny = (dx / len) * hw;
-            pos.push(x1+nx, y1+ny, 0.02, x1-nx, y1-ny, 0.02, x2-nx, y2-ny, 0.02, x2+nx, y2+ny, 0.02);
+            const z1 = getZ(x1, y1) + 0.15, z2 = getZ(x2, y2) + 0.15;
+            pos.push(x1+nx, y1+ny, z1, x1-nx, y1-ny, z1, x2-nx, y2-ny, z2, x2+nx, y2+ny, z2);
             idx.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
             vi += 4;
           }
@@ -244,23 +293,24 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
         let cnt = 0;
         for (const b of data.buildings) {
           if (b.pts.length < 3) continue;
-          addMesh(bGroup, buildingGeo(b.pts, b.height), LAYER_CONFIG.BUILDINGS.faceHex, LAYER_CONFIG.BUILDINGS.edgeHex, true);
+          addMesh(bGroup, buildingGeo(b.pts, b.height, b.baseElev),
+            LAYER_CONFIG.BUILDINGS.faceHex, LAYER_CONFIG.BUILDINGS.edgeHex, true);
           cnt++;
         }
         setBldCount(cnt);
 
-        // 원점 마커 (대상 대지)
+        // 원점 마커
         const markerGeo = new THREE.CylinderGeometry(2, 2, 0.4, 24);
         markerGeo.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2));
         const markerMesh = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: 0xff3333 }));
-        markerMesh.position.z = 0.2;
+        markerMesh.position.z = centerElev + 0.2;
         scene.add(markerMesh);
 
         // ── 마우스 궤도 회전 ──────────────────────────────────────
         let isDragging = false, lastX = 0, lastY = 0;
         let theta = Math.atan2(d * 0.8, -d * 0.9);
-        let phi   = Math.atan2(d * 0.7, Math.hypot(d * 0.8, d * 0.9));
-        const R   = Math.sqrt(d*d*0.8*0.8 + d*d*0.9*0.9 + d*d*0.7*0.7);
+        let phi   = Math.atan2(dz, Math.hypot(d * 0.8, d * 0.9));
+        const R   = Math.sqrt((d*0.8)**2 + (d*0.9)**2 + dz**2);
 
         function updateCamera() {
           const cosP = Math.cos(phi);
@@ -269,7 +319,7 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
             R * Math.sin(theta) * cosP,
             R * Math.sin(phi),
           );
-          camera.lookAt(0, 0, 0);
+          camera.lookAt(0, 0, centerElev);
         }
         updateCamera();
 
@@ -279,8 +329,8 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
         const move = (e: MouseEvent) => {
           if (!isDragging) return;
           theta -= (e.clientX - lastX) * 0.008;
-          phi    = Math.max(0.1, Math.min(Math.PI / 2 - 0.05, phi + (e.clientY - lastY) * 0.006));
-          lastX  = e.clientX; lastY = e.clientY;
+          phi    = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, phi + (e.clientY - lastY) * 0.006));
+          lastX = e.clientX; lastY = e.clientY;
           updateCamera();
         };
         const wheel = (e: WheelEvent) => {
@@ -347,7 +397,6 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
 
       {/* ── 레이어 패널 ──────────────────────────────────────────── */}
       <div className="w-[180px] shrink-0 bg-white border-l border-gray-200 flex flex-col overflow-y-auto">
-        {/* 패널 헤더 */}
         <div className="px-3 py-2.5 bg-[#F2F2F7] border-b border-gray-200">
           <p className="text-[11px] font-bold text-gray-700 leading-tight">레이어</p>
           {!loading && !error && (
@@ -355,7 +404,6 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
           )}
         </div>
 
-        {/* 레이어 목록 */}
         <div className="flex-1">
           {LAYER_KEYS.map((key, i) => {
             const cfg = LAYER_CONFIG[key];
@@ -367,7 +415,6 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  {/* 레이어 색상 인디케이터 */}
                   <span
                     className="inline-block w-2.5 h-2.5 rounded-sm shrink-0 border"
                     style={{
@@ -383,11 +430,17 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
           })}
         </div>
 
-        {/* 안내 */}
         <div className="px-3 py-2.5 border-t border-gray-100 bg-[#F2F2F7]">
-          <p className="text-[10px] text-gray-400 leading-relaxed">
-            레이어는 미리보기 전용<br />DAE 파일에 모두 포함
-          </p>
+          {elevRange ? (
+            <p className="text-[10px] text-gray-500 leading-relaxed">
+              지형 {elevRange.min}m ~ {elevRange.max}m<br />
+              <span className="text-gray-400">경사 {elevRange.max - elevRange.min}m</span>
+            </p>
+          ) : (
+            <p className="text-[10px] text-gray-400 leading-relaxed">
+              레이어는 미리보기 전용<br />DAE 파일에 모두 포함
+            </p>
+          )}
         </div>
       </div>
     </div>
