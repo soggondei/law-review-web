@@ -4,6 +4,11 @@ Codex 인계용. 작업 완료 시마다 아래에 항목 추가.
 
 ---
 
+## [2026-06-13] lib/collada.ts 분리 (PR #18 Codex)
+- 변경파일: `lib/collada.ts` (신규, Codex), `app/api/massexport/route.ts` (인라인 빌더 제거)
+- 핵심변경: Collada 빌더 lib 분리 → `buildDae(DaeInput)` 단일 진입점. `asCounterClockwise()`로 법선 방향 자동 교정, `escapeXml()`로 addr 안전 처리.
+- 주의사항: `DaePolyline.width`는 전체 폭(m). ROADS=3, SIDEWALK=1.5.
+
 ## [2026-06-13] 주변 매스 미리보기 + SketchUp Collada 다운로드
 - 변경파일: `components/MassPreview3D.tsx` (신규), `app/api/masspreview/route.ts` (신규), `app/api/massexport/route.ts` (신규), `app/page.tsx`
 - 핵심변경:
