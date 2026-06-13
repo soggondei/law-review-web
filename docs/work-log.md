@@ -4,6 +4,16 @@ Codex 인계용. 작업 완료 시마다 아래에 항목 추가.
 
 ---
 
+## [2026-06-13] CAD 반경 선택 + 보도 레이어 분리
+- 변경파일: `app/api/cadexport/route.ts`, `app/page.tsx`
+- 핵심변경:
+  - 헤더에 30m/50m/100m 토글 버튼 추가 (`cadRadius` state) → CAD 다운로드 시 `radius` 파라미터 전달
+  - Vworld size 자동 조정: radius ≤30 → 50, ≤50 → 100, 그 외 → 200
+  - OSM highway 태그 분리: SIDEWALK_TAGS(footway/pedestrian/path/steps/cycleway) → SIDEWALK 레이어(cyan), ROAD_TAGS → ROADS 레이어
+  - 어노테이션에 반경·보도 범례 추가, 파일명에 반경 표기
+- 검증: Playwright — 버튼 토글 ✅, API radius=30m(7.1KB)/50m(8.9KB)/100m(19.3KB) 크기 차이 확인 ✅
+- 주의사항: Codex는 `cadexport/route.ts` 수정 금지.
+
 ## [2026-06-13] 합필 시나리오 기능 추가
 - 변경파일: `app/page.tsx`, `app/api/parcel-lookup/route.ts` (신규)
 - 핵심변경: 분석 전 합필 모드 토글 → 인접 필지 주소 입력 → 용도지역 일치 확인 + 면적 자동조회 → 합산 면적으로 analyze API 호출
