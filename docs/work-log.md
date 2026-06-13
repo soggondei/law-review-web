@@ -4,6 +4,17 @@ Codex 인계용. 작업 완료 시마다 아래에 항목 추가.
 
 ---
 
+## [2026-06-13] 경사지 대지 terrain elevation 지원
+- 변경파일: `app/api/masspreview/route.ts`, `components/MassPreview3D.tsx`
+- 핵심변경:
+  - Open-Elevation SRTM API로 5×5 grid(25점) 고도 데이터 수집 (Vworld/OSM과 병렬 fetch)
+  - bilinear 보간으로 건물 중심 `baseElev` 계산 → `MassBuilding.baseElev` 필드 추가
+  - `MassPreviewData.terrain: TerrainGrid | null` 추가 (grid, rows, cols, minElev, maxElev)
+  - `MassPreview3D`: terrain mesh 렌더링(5×5 그리드 기반 경사 지면), 건물 z-offset 적용
+  - 도로·필지 각 꼭짓점에 `getZ()` per-vertex elevation 적용
+  - 레이어 패널 하단에 "지형 minElev~maxElev / 경사 Xm" 표시
+- 주의사항: elevation API(api.open-elevation.com) 타임아웃(8초) 시 terrain=null로 폴백, 모든 기능 정상 동작.
+
 ## [2026-06-13] lib/collada.ts 분리 (PR #18 Codex)
 - 변경파일: `lib/collada.ts` (신규, Codex), `app/api/massexport/route.ts` (인라인 빌더 제거)
 - 핵심변경: Collada 빌더 lib 분리 → `buildDae(DaeInput)` 단일 진입점. `asCounterClockwise()`로 법선 방향 자동 교정, `escapeXml()`로 addr 안전 처리.
