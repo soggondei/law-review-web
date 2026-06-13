@@ -4,6 +4,16 @@ Codex 인계용. 작업 완료 시마다 아래에 항목 추가.
 
 ---
 
+## [2026-06-13] 합필 시나리오 기능 추가
+- 변경파일: `app/page.tsx`, `app/api/parcel-lookup/route.ts` (신규)
+- 핵심변경: 분석 전 합필 모드 토글 → 인접 필지 주소 입력 → 용도지역 일치 확인 + 면적 자동조회 → 합산 면적으로 analyze API 호출
+- 주의사항: `parcel-lookup` API는 fetchBuildingInfo + fetchLandUseInfo 병렬 호출. Codex는 이 파일 수정 금지.
+
+## [2026-06-12] PR #16 good parts 수동 적용
+- 변경파일: `lib/judge.ts`, `lib/api.ts`, `lib/data/parking-ordinances.json` (신규)
+- 핵심변경: JSON 분리(Issue#15) + Confidence `"user_input"` + PARKING_REGION_ALIASES + ORDINANCES 17개 시도 + findOrdinanceRegion
+- 주의사항: Codex `app/page.tsx` 수정 금지 위반으로 PR#16 Close. 이후 Codex PR에서 page.tsx 절대 포함 금지.
+
 ## [2026-06-12] 자가평가 기반 보완 4종
 - 변경파일: `lib/api.ts`, `lib/judge.ts`, `app/api/analyze/route.ts`, `app/api/cadexport/route.ts`, `app/page.tsx`
 - 핵심변경:

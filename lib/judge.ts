@@ -1,206 +1,62 @@
 /**
  * 5대 분류 판단 함수 (기존 fetch-laws.js에서 이식)
  */
+import parkingOrdinancesData from "@/lib/data/parking-ordinances.json";
 
 // ── 주차장 기준 ───────────────────────────────────────────────────────────────
+export type Confidence = "confirmed" | "estimated" | "unverified" | "user_input";
 type ParkingRounding = "ceil" | "half-up";
-type ParkingAreaRule = { per: number; 근거: string; note?: string; rounding?: ParkingRounding };
-type ParkingUnitRule = { perUnit: number; 근거: string; note?: string };
+type ParkingRuleMeta = { sourceUrl?: string; effectiveDate?: string; confidence?: Confidence };
+type ParkingAreaRule = { per: number; 근거: string; note?: string; rounding?: ParkingRounding } & ParkingRuleMeta;
+type ParkingUnitRule = { perUnit: number; 근거: string; note?: string } & ParkingRuleMeta;
 type ParkingOrdinance = {
   area: Record<string, ParkingAreaRule>;
   unit: Record<string, ParkingUnitRule>;
   disabled?: { minTotal: number; rate: number; 근거: string };
+  sourceUrl?: string;
+  effectiveDate?: string;
+  confidence: Confidence;
+  note?: string;
+};
+type ParkingOrdinanceJson = Omit<ParkingOrdinance, "area"> & {
+  area?: Record<string, ParkingAreaRule>;
+  areaPreset?: "nationalLawArea";
 };
 type ParkingOptions = {
   오피스텔전용면적?: number;
 };
 
-const PARKING_ORDINANCES: Record<string, ParkingOrdinance> = {
-  "서울특별시": {
-    area: {
-      "단독주택":       { per: 50,  근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "다가구주택":     { per: 50,  근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "근린생활시설":   { per: 134, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2", note: "제1종 일부 및 제2종 근린생활시설 등 세부 예외 확인", rounding: "half-up" },
-      "업무시설":       { per: 150, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "판매시설":       { per: 150, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "의료시설":       { per: 134, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "숙박시설":       { per: 134, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "교육연구":       { per: 200, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "문화집회":       { per: 150, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-    },
-    unit: {
-      "아파트":     { perUnit: 1.0, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "연립주택":   { perUnit: 0.8, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "다세대주택": { perUnit: 0.7, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-      "기숙사":     { perUnit: 0.3, 근거: "서울특별시 주차장 설치 및 관리 조례 별표2" },
-    },
-    disabled: { minTotal: 10, rate: 0.03, 근거: "장애인등편의법 및 지자체 실무 기준 확인 필요" },
-  },
-  "부산광역시": {
-    area: {
-      "위락시설":       { per: 67,  근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "문화집회":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "종교시설":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "판매시설":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "운수시설":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "의료시설":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "운동시설":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "업무시설":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "장례식장":       { per: 100, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "근린생활시설":   { per: 134, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", note: "제1종 일부 및 제2종 근린생활시설, 숙박시설", rounding: "half-up" },
-      "숙박시설":       { per: 134, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "수련시설":       { per: 350, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "공장":           { per: 350, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "창고시설":       { per: 400, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "기숙사":         { per: 400, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "데이터센터":     { per: 400, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-      "기타":           { per: 200, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7", rounding: "half-up" },
-    },
-    unit: {
-      "아파트":     { perUnit: 1.0, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7" },
-      "연립주택":   { perUnit: 0.8, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7" },
-      "다세대주택": { perUnit: 0.7, 근거: "부산광역시 주차장 설치 및 관리 조례 별표7" },
-    },
-    disabled: { minTotal: 10, rate: 0.03, 근거: "부산광역시 주차장 설치 및 관리 조례 및 장애인등편의법 기준" },
-  },
-  "인천광역시": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "인천광역시 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "인천광역시 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.6, 근거: "인천광역시 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "인천광역시 주차장 설치 및 관리 조례" },
-    },
-  },
-  "대구광역시": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "대구광역시 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "대구광역시 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.6, 근거: "대구광역시 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "대구광역시 주차장 설치 및 관리 조례" },
-    },
-  },
-  "광주광역시": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "광주광역시 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "광주광역시 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "광주광역시 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "광주광역시 주차장 설치 및 관리 조례" },
-    },
-  },
-  "대전광역시": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "대전광역시 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "대전광역시 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "대전광역시 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "대전광역시 주차장 설치 및 관리 조례" },
-    },
-  },
-  "울산광역시": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.9, 근거: "울산광역시 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.7, 근거: "울산광역시 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.6, 근거: "울산광역시 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "울산광역시 주차장 설치 및 관리 조례" },
-    },
-  },
-  "세종특별자치시": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 1.0, 근거: "세종특별자치시 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.7, 근거: "세종특별자치시 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.6, 근거: "세종특별자치시 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "세종특별자치시 주차장 설치 및 관리 조례" },
-    },
-  },
-  "경기도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "경기도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "경기도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "경기도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "경기도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "강원특별자치도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "강원특별자치도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "강원특별자치도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "강원특별자치도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "강원특별자치도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "충청북도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.7, 근거: "충청북도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "충청북도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "충청북도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "충청북도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "충청남도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.7, 근거: "충청남도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "충청남도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "충청남도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "충청남도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "전라북도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.7, 근거: "전라북도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "전라북도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "전라북도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "전라북도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "전라남도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.7, 근거: "전라남도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "전라남도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "전라남도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "전라남도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "경상북도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "경상북도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.6, 근거: "경상북도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.5, 근거: "경상북도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "경상북도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "경상남도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 0.8, 근거: "경상남도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.7, 근거: "경상남도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.6, 근거: "경상남도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "경상남도 주차장 설치 및 관리 조례" },
-    },
-  },
-  "제주특별자치도": {
-    area: nationalLawArea(),
-    unit: {
-      "아파트":     { perUnit: 1.0, 근거: "제주특별자치도 주차장 설치 및 관리 조례" },
-      "연립주택":   { perUnit: 0.7, 근거: "제주특별자치도 주차장 설치 및 관리 조례" },
-      "다세대주택": { perUnit: 0.6, 근거: "제주특별자치도 주차장 설치 및 관리 조례" },
-      "기숙사":     { perUnit: 0.3, 근거: "제주특별자치도 주차장 설치 및 관리 조례" },
-    },
-  },
-};
+function nationalLawArea(): Record<string, ParkingAreaRule> {
+  const note = "조례 미확인 — 법정 기준 잠정 적용";
+  const confidence: Confidence = "unverified";
+  return {
+    "단독주택":       { per: 50,  근거: "주차장법 시행령 별표1", note, confidence },
+    "다가구주택":     { per: 50,  근거: "주차장법 시행령 별표1", note, confidence },
+    "근린생활시설":   { per: 134, 근거: "주차장법 시행령 별표1", note, confidence },
+    "업무시설":       { per: 150, 근거: "주차장법 시행령 별표1", note, confidence },
+    "판매시설":       { per: 150, 근거: "주차장법 시행령 별표1", note, confidence },
+    "의료시설":       { per: 134, 근거: "주차장법 시행령 별표1", note, confidence },
+    "숙박시설":       { per: 200, 근거: "주차장법 시행령 별표1", note, confidence },
+    "교육연구":       { per: 200, 근거: "주차장법 시행령 별표1", note, confidence },
+    "문화집회":       { per: 100, 근거: "주차장법 시행령 별표1", note, confidence },
+    "공장":           { per: 350, 근거: "주차장법 시행령 별표1", note, confidence },
+    "창고시설":       { per: 350, 근거: "주차장법 시행령 별표1", note, confidence },
+  };
+}
 
-export type Confidence = "confirmed" | "estimated" | "unverified";
+function normalizeParkingOrdinances(db: Record<string, ParkingOrdinanceJson>): Record<string, ParkingOrdinance> {
+  return Object.fromEntries(
+    Object.entries(db).map(([key, ordinance]) => [
+      key,
+      {
+        ...ordinance,
+        area: ordinance.area ?? (ordinance.areaPreset === "nationalLawArea" ? nationalLawArea() : {}),
+      },
+    ])
+  );
+}
+
+const PARKING_ORDINANCES = normalizeParkingOrdinances(parkingOrdinancesData as Record<string, ParkingOrdinanceJson>);
 
 type LawReviewItem = {
   category: string;
@@ -227,31 +83,47 @@ function resolveConf(item: { confidence?: Confidence; 해당여부: string }): C
   return item.confidence ?? "confirmed";
 }
 
+function inferConfidence(item: { 해당여부?: string; 내용?: string; 설계기준?: string | null; 비고?: string | null; confidence?: Confidence }): Confidence {
+  if (item.confidence) return item.confidence;
+  const text = `${item.해당여부 ?? ""} ${item.내용 ?? ""} ${item.설계기준 ?? ""} ${item.비고 ?? ""}`;
+  if (text.includes("직접입력") || text.includes("수정됨")) return "user_input";
+  if (text.includes("판단불가") || text.includes("확인 필요") || text.includes("미확인") || text.includes("조례 미확인")) return "unverified";
+  if (text.includes("추정") || text.includes("약 ")) return "estimated";
+  return "confirmed";
+}
+
+function withConfidence<T extends { confidence?: Confidence; 해당여부?: string; 내용?: string; 설계기준?: string | null; 비고?: string | null }>(items: T[]): (T & { confidence: Confidence })[] {
+  return items.map(item => ({ ...item, confidence: inferConfidence(item) }));
+}
+
 const W = (s: string) => `⚠️ ${s}`;
 const N = "❌ 해당없음";
 const isPositive = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value > 0;
 
-function nationalLawArea(): Record<string, ParkingAreaRule> {
-  const note = "조례 미확인 — 법정 기준 잠정 적용";
-  return {
-    "단독주택":       { per: 50,  근거: "주차장법 시행령 별표1", note },
-    "다가구주택":     { per: 50,  근거: "주차장법 시행령 별표1", note },
-    "근린생활시설":   { per: 134, 근거: "주차장법 시행령 별표1", note },
-    "업무시설":       { per: 150, 근거: "주차장법 시행령 별표1", note },
-    "판매시설":       { per: 150, 근거: "주차장법 시행령 별표1", note },
-    "의료시설":       { per: 134, 근거: "주차장법 시행령 별표1", note },
-    "숙박시설":       { per: 200, 근거: "주차장법 시행령 별표1", note },
-    "교육연구":       { per: 200, 근거: "주차장법 시행령 별표1", note },
-    "문화집회":       { per: 100, 근거: "주차장법 시행령 별표1", note },
-    "공장":           { per: 350, 근거: "주차장법 시행령 별표1", note },
-    "창고시설":       { per: 350, 근거: "주차장법 시행령 별표1", note },
-  };
-}
+const PARKING_REGION_ALIASES: Record<string, string[]> = {
+  "서울특별시":     ["서울", "서울특별시"],
+  "부산광역시":     ["부산", "부산광역시"],
+  "인천광역시":     ["인천", "인천광역시"],
+  "대구광역시":     ["대구", "대구광역시"],
+  "광주광역시":     ["광주", "광주광역시"],
+  "대전광역시":     ["대전", "대전광역시"],
+  "울산광역시":     ["울산", "울산광역시"],
+  "세종특별자치시": ["세종", "세종특별자치시"],
+  "경기도":         ["경기", "경기도"],
+  "강원특별자치도": ["강원", "강원특별자치도"],
+  "충청북도":       ["충북", "충청북도"],
+  "충청남도":       ["충남", "충청남도"],
+  "전북특별자치도": ["전북", "전북특별자치도", "전라북도"],
+  "전라남도":       ["전남", "전라남도"],
+  "경상북도":       ["경북", "경상북도"],
+  "경상남도":       ["경남", "경상남도"],
+  "제주특별자치도": ["제주", "제주특별자치도"],
+};
 
 function getParkingOrdinance(siNm = "") {
-  const key = Object.keys(PARKING_ORDINANCES).find(k =>
-    siNm.includes(k) || siNm.includes(k.replace("특별시", "").replace("광역시", "").replace("특별자치시", "").replace("특별자치도", "").replace("도", ""))
+  const key = Object.keys(PARKING_ORDINANCES).find(region =>
+    PARKING_REGION_ALIASES[region]?.some(alias => siNm.includes(alias))
   );
   return key ? { key, ordinance: PARKING_ORDINANCES[key] } : null;
 }

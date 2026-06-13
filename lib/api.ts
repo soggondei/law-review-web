@@ -254,12 +254,48 @@ const ORDINANCES: Record<string, OrdinanceDB> = {
     "자연녹지지역":      { 건폐율:20, 용적률:100 },
     "계획관리지역":      { 건폐율:40, 용적률:100 },
   },
+  "대전광역시": {},
+  "울산광역시": {},
+  "세종특별자치시": {},
+  "강원특별자치도": {},
+  "충청북도": {},
+  "충청남도": {},
+  "전북특별자치도": {},
+  "전라남도": {},
+  "경상북도": {},
+  "경상남도": {},
+  "제주특별자치도": {},
 };
+
+const REGION_ALIASES: Record<string, string[]> = {
+  "서울특별시":     ["서울", "서울특별시"],
+  "부산광역시":     ["부산", "부산광역시"],
+  "인천광역시":     ["인천", "인천광역시"],
+  "대구광역시":     ["대구", "대구광역시"],
+  "광주광역시":     ["광주", "광주광역시"],
+  "대전광역시":     ["대전", "대전광역시"],
+  "울산광역시":     ["울산", "울산광역시"],
+  "세종특별자치시": ["세종", "세종특별자치시"],
+  "경기도":         ["경기", "경기도"],
+  "강원특별자치도": ["강원", "강원특별자치도"],
+  "충청북도":       ["충북", "충청북도"],
+  "충청남도":       ["충남", "충청남도"],
+  "전북특별자치도": ["전북", "전북특별자치도", "전라북도"],
+  "전라남도":       ["전남", "전라남도"],
+  "경상북도":       ["경북", "경상북도"],
+  "경상남도":       ["경남", "경상남도"],
+  "제주특별자치도": ["제주", "제주특별자치도"],
+};
+
+function findOrdinanceRegion(siNm: string) {
+  return Object.keys(ORDINANCES).find(region =>
+    REGION_ALIASES[region]?.some(alias => siNm.includes(alias))
+  );
+}
 
 /** 시도명 + 용도지역으로 조례 건폐율·용적률 반환. 없으면 null */
 export function getOrdinanceRates(siNm: string, zoneName: string): ZoneRate | null {
-  // 시도명 정규화
-  const key = Object.keys(ORDINANCES).find(k => siNm.includes(k.replace("특별시","").replace("광역시","").replace("도","")));
+  const key = findOrdinanceRegion(siNm);
   const db = key ? ORDINANCES[key] : null;
   return db?.[zoneName] ?? null;
 }

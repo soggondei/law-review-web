@@ -263,6 +263,56 @@ export default function Home() {
   const [siteFromOSM, setSiteFromOSM] = useState(false); // 대지 형상을 OSM에서 가져왔는지 여부
   const [pdfFloors, setPdfFloors] = useState<PdfExtractResult | null>(null);
 
+  // ── 합필 시나리오 ──────────────────────────────────────────────────────────
+  type MergePart = { id: number; address: string; 용도지역?: string; 대지면적?: number; status: 'idle'|'loading'|'ok'|'error' };
+  const [합필모드, set합필모드] = useState(false);
+  const [합필필지들, set합필필지들] = useState<MergePart[]>([]);
+  const [합필주필지, set합필주필지] = useState<{ 용도지역?: string; 대지면적?: number; status: 'idle'|'loading'|'ok'|'error' }>({ status: 'idle' });
+  const 합필id카운터 = useRef(0);
+  const 합필타이머들 = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+
+  async function lookupParcelInfo(addr: string) {
+    const res = await fetch(`/api/parcel-lookup?address=${encodeURIComponent(addr)}`);
+    if (!res.ok) throw new Error();
+    return res.json() as Promise<{ 용도지역: string | null; 대지면적: number | null }>;
+  }
+
+  async function enable합필모드() {
+    set합필모드(true);
+    if (!address) return;
+    set합필주필지({ status: 'loading' });
+    try {
+      const d = await lookupParcelInfo(address);
+      set합필주필지({ 용도지역: d.용도지역 ?? undefined, 대지면적: d.대지면적 ?? undefined, status: 'ok' });
+    } catch {
+      set합필주필지({ status: 'error' });
+    }
+  }
+
+  function add합필필지() {
+    const id = ++합필id카운터.current;
+    set합필필지들(prev => [...prev, { id, address: "", status: 'idle' }]);
+  }
+
+  function update합필Address(id: number, addr: string) {
+    set합필필지들(prev => prev.map(p => p.id === id ? { ...p, address: addr, status: 'idle' as const, 용도지역: undefined, 대지면적: undefined } : p));
+    if (합필타이머들.current[id]) clearTimeout(합필타이머들.current[id]);
+    if (!addr || addr.length < 4) return;
+    합필타이머들.current[id] = setTimeout(async () => {
+      set합필필지들(prev => prev.map(p => p.id === id ? { ...p, status: 'loading' as const } : p));
+      try {
+        const d = await lookupParcelInfo(addr);
+        set합필필지들(prev => prev.map(p => p.id === id ? { ...p, 용도지역: d.용도지역 ?? undefined, 대지면적: d.대지면적 ?? undefined, status: 'ok' as const } : p));
+      } catch {
+        set합필필지들(prev => prev.map(p => p.id === id ? { ...p, status: 'error' as const } : p));
+      }
+    }, 700);
+  }
+
+  const 합필총면적 = 합필모드
+    ? (합필주필지.대지면적 ?? 0) + 합필필지들.filter(p => p.status === 'ok').reduce((s, p) => s + (p.대지면적 ?? 0), 0)
+    : 0;
+
   const filteredUseGroups = USE_LIST.map(g => ({
     group: g.group,
     items: 용도입력.trim() ? g.items.filter(i => i.includes(용도입력.trim())) : g.items,
@@ -359,9 +409,11 @@ export default function Home() {
     if (!address) { setError("주소를 입력해주세요"); return; }
     setLoading(true); setError(""); setApiResult(null);
     try {
+      const body: Record<string, unknown> = { address, 용도, 행위, 지하층입력, 세대수입력, 대수선옵션: 행위 === "대수선" ? 대수선옵션 : null };
+      if (합필모드 && 합필총면적 > 0) body.면적 = 합필총면적;
       const res = await fetch("/api/analyze", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address, 용도, 행위, 지하층입력, 세대수입력, 대수선옵션: 행위 === "대수선" ? 대수선옵션 : null }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "분석 실패");
@@ -609,6 +661,77 @@ export default function Home() {
               </ul>
             )}
           </div>
+
+          {/* ── 합필 시나리오 ── */}
+          <div className="flex justify-end mt-1.5">
+            <button
+              type="button"
+              onClick={() => { if (합필모드) { set합필모드(false); set합필필지들([]); set합필주필지({ status: 'idle' }); } else { enable합필모드(); } }}
+              className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${합필모드 ? 'bg-amber-100 border-amber-400 text-amber-800 font-semibold' : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700'}`}
+            >
+              {합필모드 ? '✕ 합필 해제' : '합필 필지 추가 +'}
+            </button>
+          </div>
+
+          {합필모드 && (
+            <div className="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2.5">
+              <div className="text-[11px] font-bold text-amber-800 tracking-wide">합필 시나리오</div>
+
+              {/* 주 필지 (읽기 전용) */}
+              <div className="flex items-center justify-between text-[12px]">
+                <div className="flex items-center gap-1 flex-1 min-w-0">
+                  <span className="text-[10px] bg-amber-200 text-amber-800 rounded px-1 shrink-0">주</span>
+                  <span className="text-gray-700 truncate">{address || "주소 미입력"}</span>
+                </div>
+                <span className="text-gray-600 font-medium ml-2 shrink-0">
+                  {합필주필지.status === 'loading' ? <span className="text-gray-400 animate-pulse">조회 중…</span> :
+                   합필주필지.status === 'ok' ? `${합필주필지.대지면적 != null ? 합필주필지.대지면적.toFixed(0) : '?'}㎡` :
+                   합필주필지.status === 'error' ? <span className="text-red-400 text-[11px]">조회 실패</span> : '—'}
+                </span>
+              </div>
+
+              {/* 추가 필지들 */}
+              {합필필지들.map(part => (
+                <div key={part.id} className="space-y-1">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] bg-gray-200 text-gray-600 rounded px-1 shrink-0">인접</span>
+                    <input
+                      value={part.address}
+                      onChange={e => update합필Address(part.id, e.target.value)}
+                      placeholder="인접 필지 주소"
+                      className="flex-1 text-[12px] border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-100"
+                    />
+                    <button type="button" onClick={() => set합필필지들(prev => prev.filter(p => p.id !== part.id))} className="text-gray-300 hover:text-red-400 text-[16px] px-0.5 leading-none">×</button>
+                  </div>
+                  {part.status === 'loading' && <div className="text-[11px] text-gray-400 pl-6 animate-pulse">조회 중…</div>}
+                  {part.status === 'ok' && (
+                    <div className="flex items-center gap-1.5 pl-6 text-[11px]">
+                      <span className="text-green-700 font-medium">{part.대지면적 != null ? `${part.대지면적.toFixed(0)}㎡` : '면적 미확인'}</span>
+                      {part.용도지역 && <span className="text-gray-400">{part.용도지역}</span>}
+                      {합필주필지.용도지역 && part.용도지역 && part.용도지역 !== 합필주필지.용도지역 && (
+                        <span className="text-red-600 bg-red-50 border border-red-200 rounded px-1">⚠ 용도지역 상이</span>
+                      )}
+                    </div>
+                  )}
+                  {part.status === 'error' && <div className="text-[11px] text-red-400 pl-6">주소 조회 실패 — 직접 확인 필요</div>}
+                </div>
+              ))}
+
+              <button type="button" onClick={add합필필지} className="text-[11px] text-amber-700 hover:text-amber-800 font-semibold">+ 인접 필지 추가</button>
+
+              {/* 합계 */}
+              {(합필주필지.status === 'ok' || 합필필지들.some(p => p.status === 'ok')) && (
+                <div className="border-t border-amber-200 pt-2 flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-amber-800">합필 총 대지면적</span>
+                  <span className="text-[13px] font-bold text-amber-900">
+                    {합필총면적 > 0 ? `${합필총면적.toFixed(0)}㎡` : '—'}
+                  </span>
+                </div>
+              )}
+              <p className="text-[10px] text-amber-600">용도지역이 동일한 연접 필지에 한해 합필 가능. 분석 시 합필 면적 기준으로 건폐율·용적률을 재산정합니다.</p>
+            </div>
+          )}
+
           <div className="relative">
             <label className="text-[12px] text-gray-500 mb-1 block">
               검토 용도
@@ -1199,7 +1322,7 @@ export default function Home() {
                       ["용도지역", r.zoneName ?? "확인 필요"],
                       ["기타지구", r.land?.기타지구?.join(", ") || "없음"],
                       ["교육환경보호구역", r.educationZone ? `⚠️ ${r.educationZone.구역명} (${r.educationZone.시군구})` : "해당 없음"],
-                      ["대지면적", `${editParams.대지면적}㎡${editParams.대지면적 !== r.baseData?.대지면적 ? " (수정됨)" : ""}${r.대지면적출처 && r.대지면적출처 !== "건축물대장" ? ` — 출처: ${r.대지면적출처}` : ""}`],
+                      ["대지면적", `${editParams.대지면적}㎡${editParams.대지면적 !== r.baseData?.대지면적 ? " (수정됨)" : ""}${합필모드 && 합필총면적 > 0 ? ` — 합필 ${합필필지들.filter(p=>p.status==='ok').length + 1}필지 합산` : r.대지면적출처 && r.대지면적출처 !== "건축물대장" ? ` — 출처: ${r.대지면적출처}` : ""}`],
                       ["기존건물", r.bldgInfo?.층수 ? `지상${r.bldgInfo.층수}층 / ${r.bldgInfo.주용도} / ${r.bldgInfo.연면적}㎡` : "미등록"],
                       ["검토용도", r.용도 || "미지정"],
                       ["행위", r.행위],
