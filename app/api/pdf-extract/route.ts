@@ -20,6 +20,7 @@ export interface PdfExtractResult {
   지상층수?: number;
   floors: FloorData[];
   pageCount: number;
+  extractMethod?: "direct" | "ocr"; // 추출 방식
 }
 
 function round2(n: number) { return Math.round(n * 100) / 100; }
@@ -173,6 +174,50 @@ function parseDoc(pages: { page: number; text: string }[]): PdfExtractResult {
   };
 }
 
+// ── 디지털 PDF 직접 텍스트 추출 (CAD/Revit 출력본) ──────────────────────────
+// pdfjs-dist로 텍스트 레이어가 있는 PDF를 OCR 없이 파싱.
+// 의미있는 텍스트(한국어 + 소수)가 없으면 null 반환 → OCR 폴백.
+async function extractTextDirect(
+  buffer: Buffer,
+): Promise<{ page: number; text: string }[] | null> {
+  try {
+    const pdfjs = (await import("pdfjs-dist/legacy/build/pdf.mjs" as string)) as any;
+    pdfjs.GlobalWorkerOptions.workerSrc = "";
+
+    const doc = await pdfjs
+      .getDocument({
+        data: new Uint8Array(buffer),
+        useWorkerFetch:  false,
+        isEvalSupported: false,
+        useSystemFonts:  true,
+        disableFontFace: true,
+      })
+      .promise;
+
+    const results: { page: number; text: string }[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page    = await doc.getPage(i);
+      const content = await page.getTextContent();
+      const text    = (content.items as any[])
+        .filter((item: any) => "str" in item)
+        .map((item: any) => item.str + (item.hasEOL ? "\n" : " "))
+        .join("");
+      // i-1 로 매핑: pdfjs page 1(커버)→ key 0, page 2(설계개요)→ key 1 …
+      results.push({ page: i - 1, text });
+    }
+
+    // 의미있는 텍스트 판별: 한국어 + 소수 모두 있어야 디지털 PDF로 인정
+    const allText   = results.map(r => r.text).join("");
+    const hasKorean = /[가-힣]/.test(allText);
+    const hasArea   = /\d+\.\d+/.test(allText);
+    if (!hasKorean || !hasArea) return null;
+
+    return results.filter(r => r.page !== 0); // 커버(page 0) 제외
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -181,16 +226,21 @@ export async function POST(req: NextRequest) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // pdf-parse v2: 페이지 PNG 렌더링
+    // ① 디지털 PDF: 텍스트 직접 추출 (빠르고 정확)
+    const directPages = await extractTextDirect(buffer);
+    if (directPages) {
+      const result = parseDoc(directPages);
+      return NextResponse.json({ ...result, extractMethod: "direct" } satisfies PdfExtractResult);
+    }
+
+    // ② 스캔 PDF: OCR 방식 (텍스트 레이어 없는 경우 폴백)
     const { PDFParse } = await import("pdf-parse");
     const pdfParser = new (PDFParse as any)({ data: buffer });
     const shots = await pdfParser.getScreenshot({ scale: 3.0 });
     await pdfParser.destroy();
 
-    // 커버 제외한 페이지만 OCR (index 1~)
     const pageKeys = Object.keys(shots.pages).filter((k) => k !== "0");
 
-    // Tesseract.js — 병렬 처리
     const Tesseract = (await import("tesseract.js")).default;
     const ocrResults = await Promise.all(
       pageKeys.map(async (key) => {
@@ -203,7 +253,7 @@ export async function POST(req: NextRequest) {
     );
 
     const result = parseDoc(ocrResults);
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, extractMethod: "ocr" } satisfies PdfExtractResult);
   } catch (e: any) {
     console.error("[pdf-extract]", e);
     return NextResponse.json({ error: e.message }, { status: 500 });

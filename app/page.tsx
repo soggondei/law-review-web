@@ -1357,7 +1357,7 @@ export default function Home() {
                     {pdfFloors && pdfFloors.floors.length > 0 && (
                       <div className="mt-3 rounded-xl border border-green-200 bg-green-50 overflow-hidden">
                         <div className="px-3 py-2 bg-green-700 text-white text-[11px] font-bold flex items-center justify-between">
-                          <span>PDF 추출 — 층별 면적표</span>
+                          <span>PDF 추출 — 층별 면적표{pdfFloors.extractMethod === "direct" ? " ✦ 직접추출" : " · OCR"}</span>
                           <button onClick={() => setPdfFloors(null)} className="text-green-200 hover:text-white text-[13px] leading-none">×</button>
                         </div>
                         <div className="overflow-x-auto">
