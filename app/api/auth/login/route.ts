@@ -14,7 +14,12 @@ async function makeToken(pw: string): Promise<string> {
 export async function POST(req: NextRequest) {
   const { password } = await req.json().catch(() => ({ password: "" }));
 
-  if (!password || password !== process.env.SITE_PASSWORD) {
+  const sitePassword = process.env.SITE_PASSWORD;
+  if (!sitePassword) {
+    // 암호 미설정 상태 — 관리자에게 SITE_PASSWORD 환경변수 설정 요청
+    return NextResponse.json({ error: "서버에 암호가 설정되지 않았습니다" }, { status: 503 });
+  }
+  if (!password || password !== sitePassword) {
     return NextResponse.json({ error: "잘못된 암호입니다" }, { status: 401 });
   }
 

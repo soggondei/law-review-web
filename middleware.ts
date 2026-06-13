@@ -26,6 +26,9 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // SITE_PASSWORD 미설정 시 인증 없이 통과 (초기 배포 또는 비활성화 상태)
+  if (!process.env.SITE_PASSWORD) return NextResponse.next();
+
   const token = req.cookies.get(COOKIE)?.value;
   if (token && token === (await expectedToken())) {
     return NextResponse.next();
