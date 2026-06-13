@@ -26,6 +26,15 @@ const LandUseMap = dynamic(() => import("@/components/LandUseMap"), {
 
 const PdfExtractPanel = dynamic(() => import("@/components/PdfExtractPanel"), { ssr: false });
 
+const MassPreview3D = dynamic(() => import("@/components/MassPreview3D"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full rounded-xl bg-[#1a1a2e] flex items-center justify-center" style={{ height: 380 }}>
+      <span className="text-[12px] text-gray-400 animate-pulse">매스 미리보기 로딩 중…</span>
+    </div>
+  ),
+});
+
 type Item = { category: string; 항목: string; 법령: string; 내용: string; 해당여부: string; 설계기준?: string | null; confidence?: Confidence; };
 
 const USE_LIST: { group: string; items: string[] }[] = [
@@ -540,6 +549,7 @@ export default function Home() {
   const [cadLoading, setCadLoading] = useState(false);
   const [cadRadius, setCadRadius] = useState<30 | 50 | 100>(30);
   const [objLoading, setObjLoading] = useState(false);
+  const [daeLoading, setDaeLoading] = useState(false);
 
   async function handleCadDownload() {
     if (!r?.coords?.lat || !r?.coords?.lng) return;
@@ -581,6 +591,25 @@ export default function Home() {
       a.click();
     } catch { alert("OBJ 다운로드 오류"); }
     finally { setObjLoading(false); }
+  }
+
+  async function handleDaeDownload() {
+    if (!r?.coords?.lat || !r?.coords?.lng) return;
+    setDaeLoading(true);
+    try {
+      const params = new URLSearchParams({
+        lat: String(r.coords.lat), lng: String(r.coords.lng),
+        addr: address, radius: String(cadRadius),
+      });
+      const res = await fetch(`/api/massexport?${params}`);
+      if (!res.ok) { alert("DAE 생성 실패"); return; }
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `매스_${address.slice(0, 15)}_${cadRadius}m.dae`;
+      a.click();
+    } catch { alert("DAE 다운로드 오류"); }
+    finally { setDaeLoading(false); }
   }
 
   async function handleDownload() {
@@ -638,6 +667,9 @@ export default function Home() {
                 </button>
                 <button onClick={handleObjDownload} disabled={objLoading} className="bg-[#5B4E8C] text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-[#47396E] disabled:opacity-60 transition-colors">
                   {objLoading ? "생성 중…" : "📦 OBJ"}
+                </button>
+                <button onClick={handleDaeDownload} disabled={daeLoading} className="bg-[#7B3C3C] text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-[#5C2C2C] disabled:opacity-60 transition-colors">
+                  {daeLoading ? "생성 중…" : "🏗 DAE"}
                 </button>
               </div>
             )}
@@ -1259,6 +1291,19 @@ export default function Home() {
               </div>
             );
           })()}
+
+          {r?.coords?.lat && (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <Accordion title="주변 매스 미리보기" badge={`${cadRadius}m 범위`}>
+                <div className="mt-2">
+                  <MassPreview3D lat={r.coords.lat} lng={r.coords.lng} radius={cadRadius} />
+                  <p className="mt-1.5 text-[10px] text-gray-400">
+                    OSM 건물(높이 포함) · Vworld 필지 · 도로/보도 — 🏗 DAE 버튼으로 SketchUp에서 열 수 있는 파일 다운로드
+                  </p>
+                </div>
+              </Accordion>
+            </div>
+          )}
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             <Accordion title="3D 법적 볼륨" badge={computed.areas ? `${editParams.층수}층 · 건축면적 ${computed.areas.최대건축면적}㎡` : ""}>
