@@ -1037,7 +1037,7 @@ export default function Home() {
           )}
 
           {error && <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-[12px] text-red-600">{error}</div>}
-          <div className="flex gap-2">
+          <div className="flex gap-2 mt-4">
             <button onClick={() => setInputStep(1)} className="px-3 py-2.5 bg-gray-100 text-gray-600 rounded-xl font-medium text-[13px] hover:bg-gray-200 transition-colors">← 이전</button>
             <button onClick={handleAnalyze} disabled={loading}
               className="flex-1 bg-[#1F4E79] text-white py-2.5 rounded-xl font-semibold text-[13px] hover:bg-[#1a3f63] transition-colors disabled:opacity-60">
