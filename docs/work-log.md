@@ -4,6 +4,15 @@ Codex 인계용. 작업 완료 시마다 아래에 항목 추가.
 
 ---
 
+## [2026-06-13] OBJ 다운로드(SketchUp) + 위성 오버레이 토글
+- 변경파일: `app/api/objexport/route.ts` (신규), `app/api/tile/route.ts`, `components/LandUseMap.tsx`, `app/page.tsx`
+- 핵심변경:
+  - 📦 OBJ 버튼: cadRadius 공유, `/api/objexport` → Wavefront OBJ 4그룹(PARCEL/BUILDINGS/ROADS/SIDEWALK) 생성
+  - 폴리라인 → 사각 띠(quad strip): ROADS 폭 3m, SIDEWALK 폭 1.5m
+  - tile API에 `layer=satellite` 파라미터 추가 → Vworld Satellite WMTS
+  - LandUseMap 우상단에 🗺/🛰 토글 버튼 (자체 상태 관리)
+- 주의사항: `app/api/objexport/route.ts`는 인라인 OBJ 빌더 포함. Codex PR(`codex/obj-export-lib`)가 `lib/objexport.ts` 완성 시 lib 함수로 교체 예정.
+
 ## [2026-06-13] CAD 반경 선택 + 보도 레이어 분리
 - 변경파일: `app/api/cadexport/route.ts`, `app/page.tsx`
 - 핵심변경:
