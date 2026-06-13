@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import type { Map as LeafletMap } from "leaflet";
+import { useEffect, useRef, useState } from "react";
+import type { Map as LeafletMap, TileLayer } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 interface LandUseMapProps {
@@ -13,6 +13,8 @@ interface LandUseMapProps {
 export default function LandUseMap({ lat, lng, zoneName }: LandUseMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<LeafletMap | null>(null);
+  const baseTileRef  = useRef<TileLayer | null>(null);
+  const [satellite, setSatellite] = useState(false);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -35,11 +37,13 @@ export default function LandUseMap({ lat, lng, zoneName }: LandUseMapProps) {
       mapRef.current = map;
 
       // ── VWorld 기본지도 (도로·건물·지적 배경) ──────────────────
-      L.tileLayer("/api/tile?z={z}&x={x}&y={y}", {
+      const baseLayer = L.tileLayer("/api/tile?z={z}&x={x}&y={y}", {
         maxZoom: 19,
         tileSize: 256,
         updateWhenZooming: false,
-      }).addTo(map);
+      });
+      baseLayer.addTo(map);
+      baseTileRef.current = baseLayer;
 
       // ── 토지이용계획 WMS 오버레이 ───────────────────────────────
       // lt_c_uq111: 용도지역·지구·구역 + 규제 구역 통합 레이어
@@ -80,11 +84,32 @@ export default function LandUseMap({ lat, lng, zoneName }: LandUseMapProps) {
     mapRef.current?.setView([lat, lng], 17);
   }, [lat, lng]);
 
+  // 위성 토글 시 베이스 레이어 교체
+  useEffect(() => {
+    const map = mapRef.current;
+    const layer = baseTileRef.current;
+    if (!map || !layer) return;
+    const url = satellite
+      ? "/api/tile?layer=satellite&z={z}&x={x}&y={y}"
+      : "/api/tile?z={z}&x={x}&y={y}";
+    (layer as any).setUrl(url);
+  }, [satellite]);
+
   return (
-    <div
-      ref={containerRef}
-      className="w-full rounded-lg overflow-hidden border border-gray-200"
-      style={{ height: 320 }}
-    />
+    <div className="relative w-full">
+      <div
+        ref={containerRef}
+        className="w-full rounded-lg overflow-hidden border border-gray-200"
+        style={{ height: 320 }}
+      />
+      <button
+        onClick={() => setSatellite(s => !s)}
+        className={`absolute top-2 right-2 z-[1000] text-[11px] px-2 py-1 rounded font-medium shadow transition-colors ${
+          satellite ? "bg-[#1F4E79] text-white" : "bg-white text-gray-600 border border-gray-300 hover:bg-gray-50"
+        }`}
+      >
+        {satellite ? "🛰 위성" : "🗺 지도"}
+      </button>
+    </div>
   );
 }

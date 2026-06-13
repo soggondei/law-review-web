@@ -539,6 +539,7 @@ export default function Home() {
 
   const [cadLoading, setCadLoading] = useState(false);
   const [cadRadius, setCadRadius] = useState<30 | 50 | 100>(30);
+  const [objLoading, setObjLoading] = useState(false);
 
   async function handleCadDownload() {
     if (!r?.coords?.lat || !r?.coords?.lng) return;
@@ -559,6 +560,27 @@ export default function Home() {
       a.click();
     } catch { alert("CAD 다운로드 오류"); }
     finally { setCadLoading(false); }
+  }
+
+  async function handleObjDownload() {
+    if (!r?.coords?.lat || !r?.coords?.lng) return;
+    setObjLoading(true);
+    try {
+      const params = new URLSearchParams({
+        lat: String(r.coords.lat),
+        lng: String(r.coords.lng),
+        addr: address,
+        radius: String(cadRadius),
+      });
+      const res = await fetch(`/api/objexport?${params}`);
+      if (!res.ok) { alert("OBJ 생성 실패"); return; }
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `지적도_${address.slice(0, 15)}_${cadRadius}m.obj`;
+      a.click();
+    } catch { alert("OBJ 다운로드 오류"); }
+    finally { setObjLoading(false); }
   }
 
   async function handleDownload() {
@@ -613,6 +635,9 @@ export default function Home() {
                 </div>
                 <button onClick={handleCadDownload} disabled={cadLoading} className="bg-[#4E7B3C] text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-[#3A5C2C] disabled:opacity-60 transition-colors">
                   {cadLoading ? "생성 중…" : "📐 CAD"}
+                </button>
+                <button onClick={handleObjDownload} disabled={objLoading} className="bg-[#5B4E8C] text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-[#47396E] disabled:opacity-60 transition-colors">
+                  {objLoading ? "생성 중…" : "📦 OBJ"}
                 </button>
               </div>
             )}

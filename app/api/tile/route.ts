@@ -12,9 +12,11 @@ export async function GET(req: NextRequest) {
 
   if (!z || !x || !y) return new NextResponse("z/x/y 필요", { status: 400 });
 
-  // VWorld WMTS URL: /{key}/{layer}/{TileMatrix}/{TileRow}/{TileCol}.png
-  // TileRow=y (위도 방향), TileCol=x (경도 방향)
-  const url = `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/Base/${z}/${y}/${x}.png`;
+  const layer = searchParams.get("layer") === "satellite" ? "Satellite" : "Base";
+  const ext   = layer === "Satellite" ? "jpeg" : "png";
+
+  // VWorld WMTS URL: /{key}/{layer}/{TileMatrix}/{TileRow}/{TileCol}.{ext}
+  const url = `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/${layer}/${z}/${y}/${x}.${ext}`;
 
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
@@ -22,7 +24,7 @@ export async function GET(req: NextRequest) {
     const buf = await res.arrayBuffer();
     return new NextResponse(buf, {
       headers: {
-        "Content-Type": "image/png",
+        "Content-Type": layer === "Satellite" ? "image/jpeg" : "image/png",
         "Cache-Control": "public, max-age=86400, immutable",
       },
     });
