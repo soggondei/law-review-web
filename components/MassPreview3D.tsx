@@ -3,46 +3,29 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { MassPreviewData, TerrainGrid } from "@/app/api/masspreview/route";
 
-// ── 레이어 설정 ────────────────────────────────────────────────────────────────
-
 type LayerKey = "BUILDINGS" | "PARCELS" | "ROADS" | "SIDEWALK";
 
 const LAYER_CONFIG: Record<LayerKey, { label: string; faceHex: number; edgeHex: number }> = {
-  BUILDINGS: { label: "건물 매스",  faceHex: 0xffffff, edgeHex: 0x222222 },
-  PARCELS:   { label: "지적 필지", faceHex: 0xfff8ee, edgeHex: 0xaa8855 },
-  ROADS:     { label: "차도",      faceHex: 0xe8e8e8, edgeHex: 0x555555 },
-  SIDEWALK:  { label: "보도",      faceHex: 0xf4f4f4, edgeHex: 0x999999 },
+  BUILDINGS: { label: "건물 매스",  faceHex: 0xfafafa, edgeHex: 0x1a1a1a },
+  PARCELS:   { label: "지적 필지", faceHex: 0xfff6e0, edgeHex: 0xb8965c },
+  ROADS:     { label: "차도",      faceHex: 0x787878, edgeHex: 0x303030 },
+  SIDEWALK:  { label: "보도",      faceHex: 0xd4c8a8, edgeHex: 0x9c7c4a },
 };
 const LAYER_KEYS: LayerKey[] = ["BUILDINGS", "PARCELS", "ROADS", "SIDEWALK"];
+const S_TERRAIN = 4; // 5×5 grid → 4× upsample → 16×16 stepped cells
 
-// ── 컴포넌트 Props ─────────────────────────────────────────────────────────────
-
-interface Props {
-  lat: number;
-  lng: number;
-  radius: number;
-}
-
-// ── iOS 스타일 토글 ────────────────────────────────────────────────────────────
+interface Props { lat: number; lng: number; radius: number; }
 
 function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
   return (
     <button
       onClick={onChange}
-      className={`relative inline-flex h-[28px] w-[50px] shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
-        on ? "bg-[#34C759]" : "bg-[#C7C7CC]"
-      }`}
+      className={`relative inline-flex h-[28px] w-[50px] shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${on ? "bg-[#34C759]" : "bg-[#C7C7CC]"}`}
     >
-      <span
-        className={`pointer-events-none inline-block h-[24px] w-[24px] transform rounded-full bg-white shadow-md transition duration-200 ease-in-out ${
-          on ? "translate-x-[22px]" : "translate-x-0"
-        }`}
-      />
+      <span className={`pointer-events-none inline-block h-[24px] w-[24px] transform rounded-full bg-white shadow-md transition duration-200 ease-in-out ${on ? "translate-x-[22px]" : "translate-x-0"}`} />
     </button>
   );
 }
-
-// ── 메인 컴포넌트 ─────────────────────────────────────────────────────────────
 
 export default function MassPreview3D({ lat, lng, radius }: Props) {
   const canvasRef  = useRef<HTMLDivElement>(null);
@@ -52,7 +35,7 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
   const [bldCount, setBldCount]   = useState(0);
-  const [elevRange, setElevRange] = useState<{ min: number; max: number } | null>(null);
+  const [elevRange, setElevRange] = useState<{ min: number; max: number; step: number } | null>(null);
   const [layers, setLayers]       = useState<Record<LayerKey, boolean>>({
     BUILDINGS: true, PARCELS: true, ROADS: true, SIDEWALK: true,
   });
@@ -87,116 +70,170 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
         const data: MassPreviewData = await res.json();
         if (cancelled || !canvasRef.current) return;
 
-        const terrain = data.terrain;
+        const terrain  = data.terrain;
         const elevDiff = terrain ? terrain.maxElev - terrain.minElev : 0;
-        if (terrain) setElevRange({ min: terrain.minElev, max: terrain.maxElev });
+
+        // 계단 간격 결정
+        const STEP = !terrain ? 1
+          : elevDiff <= 4  ? 1
+          : elevDiff <= 12 ? 2
+          : elevDiff <= 30 ? 5 : 10;
+
+        if (terrain) setElevRange({ min: terrain.minElev, max: terrain.maxElev, step: STEP });
+
+        function snapZ(z: number) { return Math.round(z / STEP) * STEP; }
+
+        // terrain 셀 기반 getZ → parcels/roads가 terrain mesh와 정확히 맞춤
+        function getZ(localX: number, localY: number): number {
+          if (!terrain) return 0;
+          const sR = (terrain.rows - 1) * S_TERRAIN;
+          const sC = (terrain.cols - 1) * S_TERRAIN;
+          const ci = Math.max(0, Math.min(sC - 1, Math.floor((localX + radius) / (2 * radius / sC))));
+          const ri = Math.max(0, Math.min(sR - 1, Math.floor((localY + radius) / (2 * radius / sR))));
+          const fr = (ri + 0.5) / S_TERRAIN;
+          const fc = (ci + 0.5) / S_TERRAIN;
+          const r0 = Math.max(0, Math.min(terrain.rows - 2, Math.floor(fr)));
+          const c0 = Math.max(0, Math.min(terrain.cols - 2, Math.floor(fc)));
+          const dr = fr - r0, dc = fc - c0;
+          const e = (
+            terrain.grid[r0][c0]           * (1-dr)*(1-dc) +
+            terrain.grid[r0][c0+1]         * (1-dr)*dc     +
+            terrain.grid[r0+1][c0]         * dr    *(1-dc) +
+            terrain.grid[r0+1][c0+1]       * dr    *dc
+          ) - terrain.minElev;
+          return snapZ(e);
+        }
 
         const W = canvasRef.current.clientWidth  || 680;
         const H = canvasRef.current.clientHeight || 440;
 
-        // ── Scene ─────────────────────────────────────────────────
+        // ── Scene ────────────────────────────────────────────────
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0xffffff);
-        scene.fog = new THREE.FogExp2(0xffffff, 0.004);
+        scene.background = new THREE.Color(0xf8f8f5);
+        scene.fog = new THREE.FogExp2(0xf8f8f5, 0.003);
 
-        // ── Camera ────────────────────────────────────────────────
-        const camera = new THREE.PerspectiveCamera(32, W / H, 0.1, 3000);
+        // ── Camera ───────────────────────────────────────────────
+        const camera = new THREE.PerspectiveCamera(32, W / H, 0.1, 4000);
         const d  = radius * 1.8;
-        const dz = d * 0.7 + elevDiff * 0.4;
+        const dz = d * 0.65 + elevDiff * 0.4;
         const centerElev = terrain
-          ? terrain.grid[Math.floor(terrain.rows / 2)][Math.floor(terrain.cols / 2)] - terrain.minElev
+          ? snapZ(terrain.grid[Math.floor(terrain.rows/2)][Math.floor(terrain.cols/2)] - terrain.minElev)
           : 0;
-        camera.position.set(d * 0.8, -d * 0.9, dz);
-        camera.lookAt(0, 0, centerElev);
 
-        // ── Renderer ──────────────────────────────────────────────
+        // ── Renderer ─────────────────────────────────────────────
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.setSize(W, H);
         renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
         canvasRef.current.appendChild(renderer.domElement);
 
-        // ── 조명 ──────────────────────────────────────────────────
-        scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-        const sun = new THREE.DirectionalLight(0xffffff, 0.9);
-        sun.position.set(radius * 1.2, -radius * 0.5, radius * 2 + elevDiff);
+        // ── 조명 ─────────────────────────────────────────────────
+        scene.add(new THREE.AmbientLight(0xffffff, 0.82));
+        const sun = new THREE.DirectionalLight(0xfff5e0, 1.0);
+        sun.position.set(radius * 0.8, -radius * 0.3, radius * 2.5 + elevDiff);
         sun.castShadow = true;
         sun.shadow.mapSize.set(2048, 2048);
         sun.shadow.camera.left   = -radius * 1.5;
         sun.shadow.camera.right  =  radius * 1.5;
         sun.shadow.camera.top    =  radius * 1.5;
         sun.shadow.camera.bottom = -radius * 1.5;
-        sun.shadow.camera.far    = 3000;
+        sun.shadow.camera.far    = 4000;
         scene.add(sun);
-        const fill = new THREE.DirectionalLight(0xddeeff, 0.3);
-        fill.position.set(-radius, radius * 0.5, radius * 0.5);
+        const fill = new THREE.DirectionalLight(0xd0e8ff, 0.35);
+        fill.position.set(-radius, radius, radius * 0.5);
         scene.add(fill);
 
-        // ── elevation 보간 함수 ────────────────────────────────────
-        function getZ(localX: number, localY: number): number {
-          if (!terrain) return 0;
-          const gr = (localY / radius + 1) / 2 * (terrain.rows - 1);
-          const gc = (localX / radius + 1) / 2 * (terrain.cols - 1);
-          const r0 = Math.max(0, Math.min(terrain.rows - 2, Math.floor(gr)));
-          const c0 = Math.max(0, Math.min(terrain.cols - 2, Math.floor(gc)));
-          const dr = gr - r0, dc = gc - c0;
-          const e = (
-            terrain.grid[r0][c0]         * (1 - dr) * (1 - dc) +
-            terrain.grid[r0][c0 + 1]     * (1 - dr) * dc +
-            terrain.grid[r0 + 1][c0]     * dr       * (1 - dc) +
-            terrain.grid[r0 + 1][c0 + 1] * dr       * dc
-          );
-          return e - terrain.minElev;
-        }
-
-        // ── 지면 (terrain mesh 또는 flat ground) ──────────────────
+        // ── 지면 (계단형 terrain 또는 flat) ──────────────────────
         if (terrain) {
           const { grid, rows, cols, minElev } = terrain;
+          const sR = (rows - 1) * S_TERRAIN;
+          const sC = (cols - 1) * S_TERRAIN;
+
+          function rawAtFrac(fr: number, fc: number): number {
+            const r0 = Math.max(0, Math.min(rows-2, Math.floor(fr)));
+            const c0 = Math.max(0, Math.min(cols-2, Math.floor(fc)));
+            const dr = Math.min(1, fr - r0), dc = Math.min(1, fc - c0);
+            return (
+              grid[r0][c0]         * (1-dr)*(1-dc) +
+              grid[r0][c0+1]       * (1-dr)*dc     +
+              grid[r0+1][c0]       * dr    *(1-dc) +
+              grid[r0+1][c0+1]     * dr    *dc
+            ) - minElev;
+          }
+
+          function cellZ(ri: number, ci: number) {
+            return snapZ(rawAtFrac((ri+0.5)/S_TERRAIN, (ci+0.5)/S_TERRAIN));
+          }
+
           const tPos: number[] = [], tIdx: number[] = [];
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              const x = ((c / (cols - 1)) * 2 - 1) * radius;
-              const y = ((r / (rows - 1)) * 2 - 1) * radius;
-              tPos.push(x, y, grid[r][c] - minElev);
+          let vi = 0;
+
+          for (let r = 0; r < sR; r++) {
+            for (let c = 0; c < sC; c++) {
+              const z  = cellZ(r, c);
+              const x0 = -radius + (c   / sC) * 2 * radius;
+              const x1 = -radius + ((c+1) / sC) * 2 * radius;
+              const y0 = -radius + (r   / sR) * 2 * radius;
+              const y1 = -radius + ((r+1) / sR) * 2 * radius;
+
+              // 상면 (법선 +Z → CCW from above)
+              tPos.push(x0,y0,z, x1,y0,z, x1,y1,z, x0,y1,z);
+              tIdx.push(vi, vi+1, vi+2,  vi, vi+2, vi+3);
+              vi += 4;
+
+              // 우측 수직벽 (법선 +X)
+              if (c + 1 < sC) {
+                const zR = cellZ(r, c+1);
+                if (zR !== z) {
+                  const zlo = Math.min(z, zR), zhi = Math.max(z, zR);
+                  tPos.push(x1,y0,zlo, x1,y1,zlo, x1,y1,zhi, x1,y0,zhi);
+                  tIdx.push(vi, vi+1, vi+2,  vi, vi+2, vi+3);
+                  vi += 4;
+                }
+              }
+              // 상단 수직벽 (법선 +Y)
+              if (r + 1 < sR) {
+                const zT = cellZ(r+1, c);
+                if (zT !== z) {
+                  const zlo = Math.min(z, zT), zhi = Math.max(z, zT);
+                  // CCW from +Y: zhi 순서로 반전
+                  tPos.push(x0,y1,zhi, x1,y1,zhi, x1,y1,zlo, x0,y1,zlo);
+                  tIdx.push(vi, vi+1, vi+2,  vi, vi+2, vi+3);
+                  vi += 4;
+                }
+              }
             }
           }
-          for (let r = 0; r < rows - 1; r++) {
-            for (let c = 0; c < cols - 1; c++) {
-              const a = r * cols + c, b = a + 1;
-              const d2 = (r + 1) * cols + c, e = d2 + 1;
-              tIdx.push(a, b, e, a, e, d2);
-            }
-          }
+
           const tGeo = new THREE.BufferGeometry();
           tGeo.setAttribute("position", new THREE.Float32BufferAttribute(tPos, 3));
           tGeo.setIndex(tIdx);
-          tGeo.computeVertexNormals();
           const tMesh = new THREE.Mesh(tGeo,
-            new THREE.MeshLambertMaterial({ color: 0xf0efe8, side: THREE.DoubleSide }));
+            new THREE.MeshLambertMaterial({ color: 0xe8e2d0, side: THREE.DoubleSide, flatShading: true }));
           tMesh.receiveShadow = true;
           scene.add(tMesh);
         } else {
-          const groundGeo = new THREE.PlaneGeometry(radius * 2, radius * 2);
-          const groundMat = new THREE.MeshLambertMaterial({ color: 0xf8f8f8, side: THREE.DoubleSide });
-          const ground    = new THREE.Mesh(groundGeo, groundMat);
-          ground.receiveShadow = true;
-          scene.add(ground);
+          const gnd = new THREE.Mesh(
+            new THREE.PlaneGeometry(radius * 2, radius * 2),
+            new THREE.MeshLambertMaterial({ color: 0xf0efe8, side: THREE.DoubleSide }),
+          );
+          gnd.receiveShadow = true;
+          scene.add(gnd);
         }
 
         // 격자선
         const gridHelper = new THREE.GridHelper(radius * 2, Math.ceil(radius / 5) * 2, 0xcccccc, 0xdddddd);
         gridHelper.rotation.x = Math.PI / 2;
-        gridHelper.position.z = centerElev - 0.05;
+        gridHelper.position.z = centerElev - 0.02;
         scene.add(gridHelper);
 
-        // ── 헬퍼 함수들 ───────────────────────────────────────────
+        // ── 헬퍼 ──────────────────────────────────────────────────
 
         function addMesh(
           group: import("three").Group,
           geo: import("three").BufferGeometry,
-          faceHex: number,
-          edgeHex: number,
+          faceHex: number, edgeHex: number,
           castShadow = false,
         ) {
           const mesh = new THREE.Mesh(geo,
@@ -204,56 +241,47 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
           mesh.castShadow    = castShadow;
           mesh.receiveShadow = true;
           group.add(mesh);
-          const edgesGeo = new THREE.EdgesGeometry(geo, 10);
-          group.add(new THREE.LineSegments(edgesGeo,
-            new THREE.LineBasicMaterial({ color: edgeHex, linewidth: 1 })));
+          // EdgesGeometry 15° 이상 각도 엣지만 표시 (삼각분할 내부선 제거)
+          group.add(new THREE.LineSegments(
+            new THREE.EdgesGeometry(geo, 15),
+            new THREE.LineBasicMaterial({ color: edgeHex }),
+          ));
         }
 
-        // 건물 geometry — baseElev를 z 오프셋으로 적용
+        // 건물: ExtrudeGeometry → concave polygon 정상 처리
         function buildingGeo(pts: [number, number][], h: number, baseElev: number) {
-          const pos: number[] = [], idx: number[] = [];
-          const n = pts.length;
-          for (const [x, y] of pts) pos.push(x, y, baseElev);
-          for (let i = 1; i < n - 1; i++) idx.push(0, i + 1, i);
-          const t = n;
-          for (const [x, y] of pts) pos.push(x, y, baseElev + h);
-          for (let i = 1; i < n - 1; i++) idx.push(t, t + i, t + i + 1);
-          for (let i = 0; i < n; i++) {
-            const j = (i + 1) % n;
-            idx.push(i, j, t + j, i, t + j, t + i);
-          }
-          const geo = new THREE.BufferGeometry();
-          geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-          geo.setIndex(idx);
-          geo.computeVertexNormals();
+          const shape = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+          const geo   = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: false });
+          geo.translate(0, 0, baseElev);
           return geo;
         }
 
-        // 필지 geometry — 각 꼭짓점 terrain elevation 적용
+        // 필지: ShapeGeometry → concave polygon 정상 처리 + terrain z
         function flatPolyGeo(pts: [number, number][]) {
-          const pos: number[] = [], idx: number[] = [];
-          for (const [x, y] of pts) pos.push(x, y, getZ(x, y) + 0.08);
-          for (let i = 1; i < pts.length - 1; i++) idx.push(0, i, i + 1);
-          const geo = new THREE.BufferGeometry();
-          geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-          geo.setIndex(idx);
+          const shape = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+          const geo   = new THREE.ShapeGeometry(shape);
+          const pos   = geo.getAttribute("position") as import("three").BufferAttribute;
+          for (let i = 0; i < pos.count; i++) {
+            pos.setZ(i, getZ(pos.getX(i), pos.getY(i)) + 0.06);
+          }
+          pos.needsUpdate = true;
           geo.computeVertexNormals();
           return geo;
         }
 
-        // 도로 띠 geometry — terrain elevation + 오프셋
+        // 도로 띠: terrain z 반영
         function stripGeo(pts: [number, number][], hw: number) {
           const pos: number[] = [], idx: number[] = [];
-          let vi = 0;
+          let vi2 = 0;
           for (let i = 0; i < pts.length - 1; i++) {
-            const [x1, y1] = pts[i], [x2, y2] = pts[i + 1];
-            const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
+            const [x1, y1] = pts[i], [x2, y2] = pts[i+1];
+            const dx = x2-x1, dy = y2-y1, len = Math.hypot(dx, dy);
             if (len < 0.01) continue;
-            const nx = (-dy / len) * hw, ny = (dx / len) * hw;
-            const z1 = getZ(x1, y1) + 0.15, z2 = getZ(x2, y2) + 0.15;
-            pos.push(x1+nx, y1+ny, z1, x1-nx, y1-ny, z1, x2-nx, y2-ny, z2, x2+nx, y2+ny, z2);
-            idx.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
-            vi += 4;
+            const nx = (-dy/len)*hw, ny = (dx/len)*hw;
+            const z1 = getZ(x1, y1) + 0.12, z2 = getZ(x2, y2) + 0.12;
+            pos.push(x1+nx,y1+ny,z1, x1-nx,y1-ny,z1, x2-nx,y2-ny,z2, x2+nx,y2+ny,z2);
+            idx.push(vi2, vi2+1, vi2+2,  vi2, vi2+2, vi2+3);
+            vi2 += 4;
           }
           const geo = new THREE.BufferGeometry();
           geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
@@ -262,7 +290,7 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
           return geo;
         }
 
-        // ── 레이어 그룹 생성 ──────────────────────────────────────
+        // ── 레이어 그룹 ───────────────────────────────────────────
         for (const key of LAYER_KEYS) {
           const g = new THREE.Group();
           g.visible = layers[key];
@@ -293,20 +321,20 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
         let cnt = 0;
         for (const b of data.buildings) {
           if (b.pts.length < 3) continue;
-          addMesh(bGroup, buildingGeo(b.pts, b.height, b.baseElev),
+          addMesh(bGroup, buildingGeo(b.pts, b.height, snapZ(b.baseElev)),
             LAYER_CONFIG.BUILDINGS.faceHex, LAYER_CONFIG.BUILDINGS.edgeHex, true);
           cnt++;
         }
         setBldCount(cnt);
 
         // 원점 마커
-        const markerGeo = new THREE.CylinderGeometry(2, 2, 0.4, 24);
-        markerGeo.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-        const markerMesh = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: 0xff3333 }));
-        markerMesh.position.z = centerElev + 0.2;
-        scene.add(markerMesh);
+        const mkGeo = new THREE.CylinderGeometry(2, 2, 0.5, 24);
+        mkGeo.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+        const mk = new THREE.Mesh(mkGeo, new THREE.MeshBasicMaterial({ color: 0xff3333 }));
+        mk.position.z = centerElev + 0.25;
+        scene.add(mk);
 
-        // ── 마우스 궤도 회전 ──────────────────────────────────────
+        // ── 카메라 궤도 ───────────────────────────────────────────
         let isDragging = false, lastX = 0, lastY = 0;
         let theta = Math.atan2(d * 0.8, -d * 0.9);
         let phi   = Math.atan2(dz, Math.hypot(d * 0.8, d * 0.9));
@@ -314,11 +342,7 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
 
         function updateCamera() {
           const cosP = Math.cos(phi);
-          camera.position.set(
-            R * Math.cos(theta) * cosP,
-            R * Math.sin(theta) * cosP,
-            R * Math.sin(phi),
-          );
+          camera.position.set(R*Math.cos(theta)*cosP, R*Math.sin(theta)*cosP, R*Math.sin(phi));
           camera.lookAt(0, 0, centerElev);
         }
         updateCamera();
@@ -329,7 +353,7 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
         const move = (e: MouseEvent) => {
           if (!isDragging) return;
           theta -= (e.clientX - lastX) * 0.008;
-          phi    = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, phi + (e.clientY - lastY) * 0.006));
+          phi    = Math.max(0.05, Math.min(Math.PI/2 - 0.05, phi + (e.clientY - lastY) * 0.006));
           lastX = e.clientX; lastY = e.clientY;
           updateCamera();
         };
@@ -343,7 +367,6 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
         window.addEventListener("mousemove", move);
         dom.addEventListener("wheel", wheel, { passive: false });
 
-        // ── 렌더 루프 ─────────────────────────────────────────────
         let rafId = 0;
         function render() { rafId = requestAnimationFrame(render); renderer.render(scene, camera); }
         render();
@@ -371,11 +394,11 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
   }, [lat, lng, radius]);
 
   return (
-    <div className="flex gap-0 w-full rounded-xl overflow-hidden border border-gray-200" style={{ height: 440 }}>
+    <div className="flex gap-0 w-full rounded-xl overflow-hidden border border-gray-200" style={{ height: 460 }}>
       {/* ── 3D 뷰포트 ───────────────────────────────────────────── */}
-      <div className="relative flex-1 bg-white">
+      <div className="relative flex-1 bg-[#f8f8f5]">
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center z-10 bg-white">
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-[#f8f8f5]">
             <div className="flex flex-col items-center gap-2">
               <div className="w-6 h-6 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
               <span className="text-[12px] text-gray-400">주변 데이터 로딩 중…</span>
@@ -383,7 +406,7 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
           </div>
         )}
         {error && (
-          <div className="absolute inset-0 flex items-center justify-center z-10 bg-white">
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-[#f8f8f5]">
             <span className="text-[12px] text-red-500">{error}</span>
           </div>
         )}
@@ -396,7 +419,7 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
       </div>
 
       {/* ── 레이어 패널 ──────────────────────────────────────────── */}
-      <div className="w-[180px] shrink-0 bg-white border-l border-gray-200 flex flex-col overflow-y-auto">
+      <div className="w-[180px] shrink-0 bg-white border-l border-gray-200 flex flex-col">
         <div className="px-3 py-2.5 bg-[#F2F2F7] border-b border-gray-200">
           <p className="text-[11px] font-bold text-gray-700 leading-tight">레이어</p>
           {!loading && !error && (
@@ -404,15 +427,13 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
           )}
         </div>
 
-        <div className="flex-1">
+        <div className="flex-1 overflow-y-auto">
           {LAYER_KEYS.map((key, i) => {
             const cfg = LAYER_CONFIG[key];
             return (
               <div
                 key={key}
-                className={`flex items-center justify-between px-3 py-2.5 ${
-                  i < LAYER_KEYS.length - 1 ? "border-b border-gray-100" : ""
-                }`}
+                className={`flex items-center justify-between px-3 py-2.5 ${i < LAYER_KEYS.length - 1 ? "border-b border-gray-100" : ""}`}
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span
@@ -432,10 +453,13 @@ export default function MassPreview3D({ lat, lng, radius }: Props) {
 
         <div className="px-3 py-2.5 border-t border-gray-100 bg-[#F2F2F7]">
           {elevRange ? (
-            <p className="text-[10px] text-gray-500 leading-relaxed">
-              지형 {elevRange.min}m ~ {elevRange.max}m<br />
-              <span className="text-gray-400">경사 {elevRange.max - elevRange.min}m</span>
-            </p>
+            <>
+              <p className="text-[11px] font-semibold text-gray-600 mb-0.5">지형 고도</p>
+              <p className="text-[10px] text-gray-500 leading-relaxed">
+                {elevRange.min}m ~ {elevRange.max}m<br />
+                경사차 {elevRange.max - elevRange.min}m · 계단 {elevRange.step}m
+              </p>
+            </>
           ) : (
             <p className="text-[10px] text-gray-400 leading-relaxed">
               레이어는 미리보기 전용<br />DAE 파일에 모두 포함
