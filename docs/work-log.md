@@ -4,6 +4,11 @@ Codex 인계용. 작업 완료 시마다 아래에 항목 추가.
 
 ---
 
+## [2026-06-13] lib/objexport.ts 분리 (PR #17 Codex)
+- 변경파일: `lib/objexport.ts` (신규, Codex), `app/api/objexport/route.ts` (인라인 빌더 제거)
+- 핵심변경: OBJ 지오메트리 빌더를 lib으로 분리 → `buildObj(groups, meta)` 단일 진입점
+- 주의사항: `polylineWidth`는 반폭(m). ROADS=1.5(폭3m), SIDEWALK=0.75(폭1.5m).
+
 ## [2026-06-13] OBJ 다운로드(SketchUp) + 위성 오버레이 토글
 - 변경파일: `app/api/objexport/route.ts` (신규), `app/api/tile/route.ts`, `components/LandUseMap.tsx`, `app/page.tsx`
 - 핵심변경:

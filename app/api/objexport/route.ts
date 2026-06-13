@@ -1,6 +1,7 @@
 export const preferredRegion = ["icn1"];
 import { NextRequest, NextResponse } from "next/server";
 import https from "https";
+import { buildObj, type ObjGroup } from "@/lib/objexport";
 
 const VWORLD_KEY = process.env.LURIS_KEY!;
 const M_PER_LAT  = 111320;
@@ -9,70 +10,6 @@ const OVERPASS_HOSTS = [
   "overpass.kumi.systems",
   "z.overpass-api.de",
 ];
-
-// ── OBJ builder (inline — Codex PR 머지 후 lib/objexport.ts로 교체 예정) ──
-
-type Pt2 = [number, number];
-
-function emitPolygon(pts: Pt2[], vOffset: number, lines: string[]): number {
-  if (pts.length < 3) return 0;
-  for (const [x, y] of pts) lines.push(`v ${x.toFixed(4)} ${y.toFixed(4)} 0`);
-  const n = pts.length;
-  for (let i = 1; i < n - 1; i++)
-    lines.push(`f ${vOffset + 1} ${vOffset + 1 + i} ${vOffset + 1 + i + 1}`);
-  return n;
-}
-
-function emitPolylineStrip(pts: Pt2[], width: number, vOffset: number, lines: string[]): number {
-  let added = 0;
-  const hw = width / 2;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const [x1, y1] = pts[i], [x2, y2] = pts[i + 1];
-    const dx = x2 - x1, dy = y2 - y1;
-    const len = Math.hypot(dx, dy);
-    if (len < 0.01) continue;
-    const px = (-dy / len) * hw, py = (dx / len) * hw;
-    lines.push(`v ${(x1 + px).toFixed(4)} ${(y1 + py).toFixed(4)} 0`);
-    lines.push(`v ${(x1 - px).toFixed(4)} ${(y1 - py).toFixed(4)} 0`);
-    lines.push(`v ${(x2 - px).toFixed(4)} ${(y2 - py).toFixed(4)} 0`);
-    lines.push(`v ${(x2 + px).toFixed(4)} ${(y2 + py).toFixed(4)} 0`);
-    const a = vOffset + added + 1, b = a + 1, c = b + 1, d = c + 1;
-    lines.push(`f ${a} ${b} ${c}`);
-    lines.push(`f ${a} ${c} ${d}`);
-    added += 4;
-  }
-  return added;
-}
-
-function buildObj(
-  parcels: Pt2[][],
-  buildings: Pt2[][],
-  roads: Pt2[][],
-  sidewalks: Pt2[][],
-  addr: string,
-  radius: number,
-): string {
-  const today = new Date().toISOString().slice(0, 10);
-  const lines: string[] = [
-    `# Wavefront OBJ — ${addr} — 생성: ${today} — 범위: ${radius}m`,
-    `# 좌표계: WGS84 로컬(m) / 그룹: PARCEL BUILDINGS ROADS SIDEWALK`,
-  ];
-  let vOff = 0;
-
-  lines.push("g PARCEL");
-  for (const pg of parcels) vOff += emitPolygon(pg, vOff, lines);
-
-  lines.push("g BUILDINGS");
-  for (const pg of buildings) vOff += emitPolygon(pg, vOff, lines);
-
-  lines.push("g ROADS");
-  for (const pl of roads) vOff += emitPolylineStrip(pl, 3.0, vOff, lines);
-
-  lines.push("g SIDEWALK");
-  for (const pl of sidewalks) vOff += emitPolylineStrip(pl, 1.5, vOff, lines);
-
-  return lines.join("\n");
-}
 
 // ── Overpass HTTPS ───────────────────────────────────────────────────────────
 
@@ -117,6 +54,8 @@ async function httpsPostWithFallback(body: string): Promise<string> {
 }
 
 // ── GET handler ──────────────────────────────────────────────────────────────
+
+type Pt2 = [number, number];
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -202,7 +141,14 @@ export async function GET(req: NextRequest) {
     }
   } catch { /* OSM 레이어 생략 */ }
 
-  const obj  = buildObj(parcels, buildings, roads, sidewalks, addr, radius);
+  // ── OBJ 생성 (lib/objexport.ts) ─────────────────────────────────────────
+  const groups: ObjGroup[] = [
+    { name: "PARCEL",    polygons: parcels },
+    { name: "BUILDINGS", polygons: buildings },
+    { name: "ROADS",     polylines: roads,     polylineWidth: 1.5 },  // 반폭 1.5m = 폭 3m
+    { name: "SIDEWALK",  polylines: sidewalks, polylineWidth: 0.75 }, // 반폭 0.75m = 폭 1.5m
+  ];
+  const obj  = buildObj(groups, { addr, radius });
   const safe = addr.slice(0, 20).replace(/[/\\:*?"<>|]/g, "_");
 
   return new NextResponse(obj, {
