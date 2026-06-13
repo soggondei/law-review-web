@@ -4,6 +4,15 @@ Codex 인계용. 작업 완료 시마다 아래에 항목 추가.
 
 ---
 
+## [2026-06-13] 주변 매스 미리보기 + SketchUp Collada 다운로드
+- 변경파일: `components/MassPreview3D.tsx` (신규), `app/api/masspreview/route.ts` (신규), `app/api/massexport/route.ts` (신규), `app/page.tsx`
+- 핵심변경:
+  - OSM `height`/`building:levels`(×3.5m) 태그로 건물 높이 수집, 기본값 10.5m(3층)
+  - `MassPreview3D`: Three.js 돌출 건물 + 필지 + 도로 띠, 드래그 회전, 결과 화면 "주변 매스 미리보기" Accordion
+  - `massexport` API → Collada `.dae` (SketchUp 네이티브 오픈, 4 그룹: BUILDINGS/PARCELS/ROADS/SIDEWALK)
+  - 헤더에 🏗 DAE 버튼 추가 (cadRadius 공유)
+- 주의사항: `massexport/route.ts`는 인라인 Collada 빌더 포함. Codex PR(`codex/collada-lib`) 머지 시 `lib/collada.ts`로 교체.
+
 ## [2026-06-13] lib/objexport.ts 분리 (PR #17 Codex)
 - 변경파일: `lib/objexport.ts` (신규, Codex), `app/api/objexport/route.ts` (인라인 빌더 제거)
 - 핵심변경: OBJ 지오메트리 빌더를 lib으로 분리 → `buildObj(groups, meta)` 단일 진입점
