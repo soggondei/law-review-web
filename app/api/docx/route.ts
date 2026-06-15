@@ -57,7 +57,7 @@ function heading(text: string, level = 1) {
 export async function POST(req: NextRequest) {
   try {
     const data = await req.json();
-    const { addrInfo, bldgInfo, land, zoneName, areas, effectiveRule, 용도, 행위, scaleItems = [], designItems = [], permitItems = [], scheduleItems = [], scheduleTotalMonths = 0, address, 연락처, 구청부서 = [], 시청부서 = [] } = data;
+    const { addrInfo, bldgInfo, land, zoneName, areas, effectiveRule, 용도, 행위, scaleItems = [], designItems = [], permitItems = [], scheduleItems = [], scheduleTotalMonths = 0, address, 연락처, 구청부서 = [], 시청부서 = [], pdfFloors = null } = data;
 
     const sections: any[] = [];
 
@@ -186,6 +186,27 @@ export async function POST(req: NextRequest) {
           ],
         }));
       }
+    }
+
+    // ── 7. 층별 면적표 (PDF 추출) ─────────────────────────────────────────────
+    if (pdfFloors?.floors?.length > 0) {
+      const method = pdfFloors.extractMethod === "direct" ? "직접 추출" : "OCR";
+      sections.push(heading("별첨. 층별 면적표 (PDF 도면 추출)"));
+      sections.push(new Paragraph({ children: [new TextRun({ text: `추출 방식: ${method} · ${pdfFloors.pageCount}페이지`, size: 18, color: "606060", font: "맑은 고딕" })], spacing: { after: 60 } }));
+      sections.push(new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          headerRow(["층", "전용면적(㎡)", "공용면적(㎡)", "중면적(㎡)"]),
+          ...pdfFloors.floors.map((f: any, i: number) => new TableRow({
+            children: [
+              new TableCell({ shading: bg(C_LABEL), children: [new Paragraph({ children: [new TextRun({ text: f.층, bold: true, size: 18, font: "맑은 고딕" })], alignment: AlignmentType.CENTER })] }),
+              new TableCell({ shading: bg(i % 2 === 0 ? C_EVEN : "FFFFFF"), children: [new Paragraph({ children: [new TextRun({ text: f.전용면적 != null ? String(f.전용면적) : "—", size: 18, font: "맑은 고딕" })], alignment: AlignmentType.CENTER })] }),
+              new TableCell({ shading: bg(i % 2 === 0 ? C_EVEN : "FFFFFF"), children: [new Paragraph({ children: [new TextRun({ text: f.공용면적 != null ? String(f.공용면적) : "—", size: 18, font: "맑은 고딕" })], alignment: AlignmentType.CENTER })] }),
+              new TableCell({ shading: bg(i % 2 === 0 ? C_EVEN : "FFFFFF"), children: [new Paragraph({ children: [new TextRun({ text: f.중면적 != null ? String(f.중면적) : "—", size: 18, font: "맑은 고딕" })], alignment: AlignmentType.CENTER })] }),
+            ],
+          })),
+        ],
+      }));
     }
 
     // ── 면책 ─────────────────────────────────────────────────────────────────

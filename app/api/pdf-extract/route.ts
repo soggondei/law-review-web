@@ -241,10 +241,23 @@ export async function POST(req: NextRequest) {
 
     const pageKeys = Object.keys(shots.pages).filter((k) => k !== "0");
 
+    async function enhanceForOcr(raw: Buffer): Promise<Buffer> {
+      try {
+        const sharp = (await import("sharp")).default;
+        return await sharp(raw)
+          .grayscale()
+          .normalize()
+          .sharpen({ sigma: 1.5 })
+          .threshold(145)
+          .toBuffer();
+      } catch { return raw; }
+    }
+
     const Tesseract = (await import("tesseract.js")).default;
     const ocrResults = await Promise.all(
       pageKeys.map(async (key) => {
-        const imgBuf = Buffer.from(shots.pages[key].data);
+        const raw = Buffer.from(shots.pages[key].data);
+        const imgBuf = await enhanceForOcr(raw);
         const { data: { text } } = await Tesseract.recognize(imgBuf, "kor+eng", {
           logger: () => {},
         } as any);

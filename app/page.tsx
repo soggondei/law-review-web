@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { judgeScaleItems, judgeDesignItems, judgePermitItems, calcAreas, calcParking } from "@/lib/judge";
 import { generateSchedule } from "@/lib/schedule";
@@ -129,6 +129,19 @@ export default function Home() {
   const [surroundings, setSurroundings] = useState<import("@/components/BuildingViewer3D").SurroundingContext | null>(null);
   const [siteFromOSM, setSiteFromOSM] = useState(false); // 대지 형상을 OSM에서 가져왔는지 여부
   const [pdfFloors, setPdfFloors] = useState<PdfExtractResult | null>(null);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [reviewHistory, setReviewHistory] = useState<{ address: string; 용도목록: string[]; 행위: string; ts: number }[]>([]);
+  const [shareToast, setShareToast] = useState(false);
+
+  // ── 초기화: URL 파라미터 복원 + 히스토리 로드 ──────────────────────────────
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const addr = p.get("addr"), use = p.get("use"), act = p.get("act");
+    if (addr) setAddress(addr);
+    if (use) set용도목록(use.split(",").filter(Boolean));
+    if (act && ["신축","대수선","용도변경"].includes(act)) set행위(act as "신축"|"대수선"|"용도변경");
+    try { const h = localStorage.getItem("review-history"); if (h) setReviewHistory(JSON.parse(h)); } catch {}
+  }, []);
 
   // ── 합필 시나리오 ──────────────────────────────────────────────────────────
   type MergePart = { id: number; address: string; 용도지역?: string; 대지면적?: number; status: 'idle'|'loading'|'ok'|'error' };
@@ -276,14 +289,29 @@ export default function Home() {
     if (!address) { setError("주소를 입력해주세요"); return; }
     setLoading(true); setError(""); setApiResult(null);
     try {
-      const body: Record<string, unknown> = { address, 용도, 행위, 지하층입력, 세대수입력, 대수선옵션: 행위 === "대수선" ? 대수선옵션 : null };
-      if (합필모드 && 합필총면적 > 0) body.면적 = 합필총면적;
-      const res = await fetch("/api/analyze", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      const cacheKey = `analyze:${address}:${용도}:${행위}`;
+      let data: any;
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        data = JSON.parse(cached);
+      } else {
+        const body: Record<string, unknown> = { address, 용도, 행위, 지하층입력, 세대수입력, 대수선옵션: 행위 === "대수선" ? 대수선옵션 : null };
+        if (합필모드 && 합필총면적 > 0) body.면적 = 합필총면적;
+        const res = await fetch("/api/analyze", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        data = await res.json();
+        if (!res.ok) throw new Error(data.error || "분석 실패");
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
+      }
+      // 히스토리 저장
+      const histItem = { address, 용도목록: [...용도목록], 행위, ts: Date.now() };
+      setReviewHistory(prev => {
+        const updated = [histItem, ...prev.filter(x => x.address !== address)].slice(0, 10);
+        try { localStorage.setItem("review-history", JSON.stringify(updated)); } catch {}
+        return updated;
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "분석 실패");
       setApiResult(data);
       setEditParams({
         층수: data.추정층수 || 0,
@@ -404,6 +432,14 @@ export default function Home() {
     finally { setLawCheckLoading(false); }
   }
 
+  function copyShareLink() {
+    const params = new URLSearchParams({ addr: address, use: 용도목록.join(","), act: 행위 });
+    navigator.clipboard.writeText(`${window.location.origin}?${params}`).then(() => {
+      setShareToast(true);
+      setTimeout(() => setShareToast(false), 2000);
+    });
+  }
+
   const [cadLoading, setCadLoading] = useState(false);
   const [cadRadius, setCadRadius] = useState<30 | 50 | 100>(30);
   const [objLoading, setObjLoading] = useState(false);
@@ -486,6 +522,7 @@ export default function Home() {
         구청부서: apiResult.구청부서,
         시청부서: apiResult.시청부서,
         address,
+        pdfFloors: pdfFloors ?? null,
       }),
     });
     if (!res.ok) { alert("DOCX 생성 실패"); return; }
@@ -503,9 +540,12 @@ export default function Home() {
 
       {/* ── 헤더 ── */}
       <header className="sticky top-0 z-20 bg-white border-b border-gray-200 px-4 flex items-center justify-between shadow-sm h-14 shrink-0">
-        <div>
-          <h1 className="text-[15px] font-bold text-[#1F4E79]">건축 법규검토</h1>
-          <p className="text-[10px] text-gray-400">자동화 분석 시스템</p>
+        <div className="flex items-center gap-3">
+          <button className="md:hidden text-gray-500 hover:text-gray-700 p-1 text-[18px] leading-none" onClick={() => setMobileSidebarOpen(v => !v)} aria-label="메뉴">☰</button>
+          <div>
+            <h1 className="text-[15px] font-bold text-[#1F4E79]">건축 법규검토</h1>
+            <p className="text-[10px] text-gray-400">자동화 분석 시스템</p>
+          </div>
         </div>
         {r && computed && (
           <div className="flex items-center gap-2">
@@ -534,16 +574,22 @@ export default function Home() {
             <button onClick={openFolderPanel} disabled={notionSaving} className="bg-black text-white text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-gray-800 disabled:opacity-60 transition-colors">
               {notionSaving ? "저장 중…" : "🗒 Notion"}
             </button>
+            <button onClick={copyShareLink} title="공유 링크 복사" className="bg-gray-100 text-gray-600 text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-gray-200 transition-colors">
+              {shareToast ? "✓ 복사됨" : "🔗"}
+            </button>
             <button onClick={() => window.print()} className="bg-gray-100 text-gray-600 text-[12px] px-3 py-1.5 rounded-lg font-medium hover:bg-gray-200 transition-colors">🖨</button>
           </div>
         )}
       </header>
 
       {/* ── 2열 본문 ── */}
-      <div className="flex flex-1">
+      <div className="flex flex-1 relative">
 
       {/* ──────────────── 사이드바 ──────────────── */}
-      <aside className="w-72 shrink-0 sticky top-14 self-start h-[calc(100vh-56px)] bg-white border-r border-gray-200 flex flex-col overflow-hidden">
+      {mobileSidebarOpen && (
+        <div className="fixed inset-0 bg-black/40 z-20 md:hidden" onClick={() => setMobileSidebarOpen(false)} />
+      )}
+      <aside className={`${mobileSidebarOpen ? "flex" : "hidden"} md:flex flex-col fixed md:sticky top-14 left-0 z-30 md:z-auto w-72 shrink-0 self-start h-[calc(100vh-56px)] bg-white border-r border-gray-200 overflow-hidden shadow-xl md:shadow-none`}>
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
           {/* ── 사업 개요 입력 ── */}
@@ -588,6 +634,20 @@ export default function Home() {
               </ul>
             )}
           </div>
+
+          {/* ── 최근 검토 히스토리 ── */}
+          {reviewHistory.length > 0 && !apiResult && (
+            <div className="mt-1.5 space-y-0.5">
+              <div className="text-[10px] text-gray-400 font-medium px-0.5">최근 검토</div>
+              {reviewHistory.slice(0, 5).map((h, i) => (
+                <button key={i} onClick={() => { setAddress(h.address); set용도목록(h.용도목록); set행위(h.행위 as "신축"|"대수선"|"용도변경"); }} className="w-full text-left text-[11px] px-2.5 py-1.5 rounded-lg hover:bg-blue-50 text-gray-600 truncate border border-gray-100 flex items-center gap-1.5 transition-colors">
+                  <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium shrink-0">{h.행위}</span>
+                  <span className="truncate">{h.address}</span>
+                  {h.용도목록[0] && <span className="text-gray-400 shrink-0 text-[10px]">· {h.용도목록[0]}</span>}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* ── 합필 시나리오 ── */}
           <div className="flex justify-end mt-1.5">
