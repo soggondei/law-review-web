@@ -1,12 +1,7 @@
 export const preferredRegion = ["icn1"];
 import { NextRequest, NextResponse } from "next/server";
-import https from "https";
+import { overpassQuery } from "@/lib/geo-fetch";
 
-const OVERPASS_HOSTS = [
-  "overpass-api.de",
-  "overpass.kumi.systems",
-  "z.overpass-api.de",
-];
 const M_PER_LAT = 111320;
 
 const ROAD_WIDTHS: Record<string, number> = {
@@ -21,49 +16,6 @@ export interface ContextBuilding {
 export interface ContextRoad {
   coords: [number, number][];
   width: number;
-}
-
-function httpsPost(host: string, body: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: host,
-      path: "/api/interpreter",
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Content-Length": Buffer.byteLength(body),
-        "User-Agent": "law-review-web/1.0 (contact:soggon@naver.com)",
-        "Accept": "application/json",
-      },
-    };
-    const req = https.request(options, (res) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (d) => chunks.push(d));
-      res.on("end", () => {
-        if (res.statusCode && res.statusCode >= 400) {
-          reject(new Error(`Overpass ${res.statusCode}`));
-        } else {
-          resolve(Buffer.concat(chunks).toString("utf-8"));
-        }
-      });
-    });
-    req.on("error", reject);
-    req.setTimeout(18000, () => { req.destroy(new Error("timeout")); });
-    req.write(body);
-    req.end();
-  });
-}
-
-async function httpsPostWithFallback(body: string): Promise<string> {
-  let lastErr: Error | null = null;
-  for (const host of OVERPASS_HOSTS) {
-    try {
-      return await httpsPost(host, body);
-    } catch (e: any) {
-      lastErr = e;
-    }
-  }
-  throw lastErr ?? new Error("Overpass unreachable");
 }
 
 export async function GET(req: NextRequest) {
@@ -85,7 +37,7 @@ export async function GET(req: NextRequest) {
     `out geom;`;
 
   try {
-    const text = await httpsPostWithFallback("data=" + encodeURIComponent(query));
+    const text = await overpassQuery("data=" + encodeURIComponent(query));
     const data = JSON.parse(text);
     const elements: any[] = data.elements ?? [];
 

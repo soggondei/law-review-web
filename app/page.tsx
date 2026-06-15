@@ -2,9 +2,12 @@
 
 import { useState, useRef, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
-import { judgeScaleItems, judgeDesignItems, judgePermitItems, calcAreas, calcParking, type Confidence } from "@/lib/judge";
+import { judgeScaleItems, judgeDesignItems, judgePermitItems, calcAreas, calcParking } from "@/lib/judge";
 import { generateSchedule } from "@/lib/schedule";
 import type { PdfExtractResult } from "@/app/api/pdf-extract/route";
+import { Accordion } from "@/components/Accordion";
+import { ItemTable, badgeColor, getLawUrl, type LawItem } from "@/components/ItemTable";
+import { ScheduleTable } from "@/components/ScheduleTable";
 
 const BuildingViewer3D = dynamic(() => import("@/components/BuildingViewer3D"), {
   ssr: false,
@@ -35,7 +38,7 @@ const MassPreview3D = dynamic(() => import("@/components/MassPreview3D"), {
   ),
 });
 
-type Item = { category: string; 항목: string; 법령: string; 내용: string; 해당여부: string; 설계기준?: string | null; confidence?: Confidence; };
+type Item = LawItem;
 
 const USE_LIST: { group: string; items: string[] }[] = [
   { group: "단독주택",          items: ["단독주택", "다중주택", "다가구주택"] },
@@ -63,29 +66,6 @@ const USE_LIST: { group: string; items: string[] }[] = [
   { group: "장례시설",          items: ["장례시설", "장례식장"] },
 ];
 
-function badgeColor(val: string) {
-  if (!val) return "bg-gray-100 text-gray-500";
-  if (val.startsWith("✅")) return "bg-green-50 text-green-700 border border-green-200";
-  if (val.startsWith("⚠️")) return "bg-yellow-50 text-yellow-700 border border-yellow-200";
-  if (val.startsWith("❌")) return "bg-gray-50 text-gray-400 border border-gray-200";
-  return "bg-blue-50 text-blue-700 border border-blue-200";
-}
-
-function Accordion({ title, badge, children }: { title: string; badge?: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="border-b border-gray-200">
-      <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-4 py-4 text-left hover:bg-gray-50 transition-colors">
-        <span className="font-medium text-gray-800 text-[15px]">{title}</span>
-        <div className="flex items-center gap-2">
-          {badge && <span className="text-sm text-blue-600 font-medium">{badge}</span>}
-          <span className="text-gray-400">{open ? "▼" : "▶"}</span>
-        </div>
-      </button>
-      {open && <div className="px-4 pb-4">{children}</div>}
-    </div>
-  );
-}
 
 function classify용도(용도: string): string {
   if (!용도) return "기타";
@@ -104,128 +84,6 @@ function classify규모(연면적: number | null): string {
   return "대규모";
 }
 
-function getLawUrl(법령: string): string | null {
-  const LAWS: [RegExp, string][] = [
-    [/건축법 시행규칙/, "건축법 시행규칙"],
-    [/건축법 시행령/, "건축법 시행령"],
-    [/건축법/, "건축법"],
-    [/주차장법 시행령/, "주차장법 시행령"],
-    [/주차장법/, "주차장법"],
-    [/국토계획법 시행령|국토의 계획/, "국토의 계획 및 이용에 관한 법률 시행령"],
-    [/국토계획법/, "국토의 계획 및 이용에 관한 법률"],
-    [/소방시설법/, "소방시설 설치 및 관리에 관한 법률"],
-    [/화재예방법/, "화재의 예방 및 안전관리에 관한 법률"],
-    [/장애인편의법|장애인노인임산부/, "장애인·노인·임산부 등의 편의증진 보장에 관한 법률"],
-    [/녹색건축물법/, "녹색건축물 조성 지원법"],
-    [/건설산업기본법/, "건설산업기본법"],
-    [/건축물관리법/, "건축물관리법"],
-    [/지하안전법/, "지하안전관리에 관한 특별법"],
-    [/에너지이용합리화법/, "에너지이용 합리화법"],
-    [/문화재보호법/, "문화재보호법"],
-    [/경관법/, "경관법"],
-    [/도시교통정비/, "도시교통정비 촉진법"],
-    [/재난안전법/, "재난 및 안전관리 기본법"],
-    [/환경영향평가법/, "환경영향평가법"],
-    [/매장문화재/, "매장문화재 보호 및 조사에 관한 법률"],
-    [/문화예술진흥법/, "문화예술진흥법"],
-    [/신에너지법|신에너지 및 재생에너지/, "신에너지 및 재생에너지 개발·이용·보급 촉진법"],
-    [/학교시설안전관리법/, "학교시설안전관리에 관한 법률"],
-  ];
-  for (const [re, name] of LAWS) {
-    if (re.test(법령)) return `https://www.law.go.kr/법령/${encodeURIComponent(name)}`;
-  }
-  return null;
-}
-
-function ItemTable({ items }: { items: Item[] }) {
-  return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200 mt-2">
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr className="bg-[#1F4E79] text-white">
-            <th className="px-3 py-2 text-left w-[110px]">구분</th>
-            <th className="px-3 py-2 text-left">법규 내용</th>
-            <th className="px-2 py-2 text-center w-[130px]">해당여부</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item, i) => (
-            <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
-              <td className="px-3 py-2 bg-blue-50/50 border-r border-gray-100 align-top">
-                <div className="text-[10px] text-blue-500">{item.category}.</div>
-                <div className="font-medium text-slate-700">{item.항목}</div>
-                <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">
-                  {(() => { const url = getLawUrl(item.법령); return url ? <a href={url} target="_blank" rel="noreferrer" className="hover:text-blue-500 hover:underline">{item.법령} ↗</a> : item.법령; })()}
-                </div>
-              </td>
-              <td className="px-3 py-2 text-gray-600 align-top">
-                <div>{item.내용}</div>
-                {item.설계기준 && <div className="mt-1 text-[11px] text-blue-600 bg-blue-50 rounded px-2 py-1">↳ 설계기준: {item.설계기준}</div>}
-              </td>
-              <td className="px-2 py-2 align-top">
-                <span className={`inline-block px-2 py-1 rounded text-[11px] font-medium ${badgeColor(item.해당여부)}`}>{item.해당여부}</span>
-                {item.confidence === "estimated" && <span className="block mt-1 text-[10px] text-amber-600 bg-amber-50 rounded px-1.5 py-0.5">🟡 추정값</span>}
-                {item.confidence === "unverified" && <span className="block mt-1 text-[10px] text-red-500 bg-red-50 rounded px-1.5 py-0.5">🔴 미확인</span>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function ScheduleTable({ items, total }: { items: any[]; total: number }) {
-  if (!items?.length) return null;
-  const grouped: Record<string, any[]> = {};
-  for (const item of items) { (grouped[item.phaseLabel] = grouped[item.phaseLabel] || []).push(item); }
-  const PC: Record<string, string> = {
-    "건축심의 접수 前": "bg-orange-100 text-orange-800",
-    "건축심의 완료 後~건축허가 前": "bg-yellow-100 text-yellow-800",
-    "건축허가 완료 後": "bg-green-100 text-green-800",
-    "착공신고 前": "bg-blue-100 text-blue-800",
-    "공사 중": "bg-gray-100 text-gray-700",
-  };
-  return (
-    <div className="space-y-4">
-      <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
-        <span className="text-sm font-medium text-blue-700">⏱ 예상 총 소요기간: </span>
-        <span className="text-lg font-bold text-blue-800">약 {total}개월</span>
-        <span className="text-sm text-blue-600 ml-2">/ {items.length}개 항목</span>
-      </div>
-      {Object.entries(grouped).map(([phase, pi]) => (
-        <div key={phase}>
-          <div className="flex items-center gap-2 mb-2">
-            <span className={`px-3 py-1 rounded-full text-[12px] font-medium ${PC[phase] || "bg-gray-100 text-gray-700"}`}>{phase}</span>
-            {pi.length > 1 && <span className="text-[11px] text-blue-500">🔀 동시 진행</span>}
-          </div>
-          <div className="overflow-x-auto rounded border border-gray-200">
-            <table className="w-full text-[12px]">
-              <thead><tr className="bg-[#2E75B6] text-white">
-                <th className="px-3 py-1.5 text-left">항목</th>
-                <th className="px-2 py-1.5 text-center w-16">구분</th>
-                <th className="px-2 py-1.5 text-center w-20">기간</th>
-                <th className="px-2 py-1.5 text-center w-20">시기</th>
-                <th className="px-3 py-1.5 text-left">담당기관</th>
-              </tr></thead>
-              <tbody>
-                {pi.map((item, j) => (
-                  <tr key={j} className={j % 2 === 0 ? "bg-white" : "bg-slate-50"}>
-                    <td className="px-3 py-2 font-medium text-gray-700">{item.name}</td>
-                    <td className="px-2 py-2 text-center text-gray-500">{item.category}</td>
-                    <td className="px-2 py-2 text-center">{item.duration_months?.min}~{item.duration_months?.max}개월</td>
-                    <td className="px-2 py-2 text-center text-blue-600">D+{item.startMonth}~D+{item.endMonth}</td>
-                    <td className="px-3 py-2 text-gray-500 text-[11px]">{(item.agency || "").split("\n")[0]}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 // 점-다각형 내부 판정 (ray-casting)
 function pipTest(pt: [number, number], poly: [number, number][]): boolean {
