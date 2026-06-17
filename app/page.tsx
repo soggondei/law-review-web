@@ -88,6 +88,22 @@ function classify용도(용도: string): string {
   return "기타";
 }
 
+function extractSetbackRules(items: Item[]): { buildingLine: number; adjacent: number; max: number } {
+  const setbackItem = items.find((item) => item.항목.includes("대지안의 공지"));
+  const source = `${setbackItem?.설계기준 ?? ""} ${setbackItem?.내용 ?? ""}`;
+  const buildingLine = Number(source.match(/건축선[^0-9]*([0-9]+(?:\.[0-9]+)?)m/)?.[1] ?? 0);
+  const adjacent = Number(source.match(/인접대지[^0-9]*([0-9]+(?:\.[0-9]+)?)m/)?.[1] ?? 0);
+  const values = [...source.matchAll(/([0-9]+(?:\.[0-9]+)?)m/g)]
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const max = values.length ? Math.max(...values) : 0;
+  return {
+    buildingLine: Number.isFinite(buildingLine) && buildingLine > 0 ? buildingLine : max,
+    adjacent: Number.isFinite(adjacent) && adjacent > 0 ? adjacent : max,
+    max,
+  };
+}
+
 function classify규모(연면적: number | null): string {
   if (!연면적) return "미상";
   if (연면적 < 500) return "소규모";
@@ -258,7 +274,7 @@ export default function Home() {
   const [용도별면적, set용도별면적] = useState<Record<string, number>>({});
   const [lawCheck, setLawCheck] = useState<{ laws: {name:string; amendDate:string|null; recent:boolean}[]; checkedAt:string; recentCount:number } | null>(null);
   const [lawCheckLoading, setLawCheckLoading] = useState(false);
-  const [parcelData, setParcelData] = useState<{ localCoords: [number,number][]; bboxAspect: number } | null>(null);
+  const [parcelData, setParcelData] = useState<{ localCoords: [number,number][]; bboxAspect: number; originOffset?: [number, number] } | null>(null);
   const [surroundings, setSurroundings] = useState<import("@/components/BuildingViewer3D").SurroundingContext | null>(null);
   const [siteFromOSM, setSiteFromOSM] = useState(false); // 대지 형상을 OSM에서 가져왔는지 여부
   const [pdfFloors, setPdfFloors] = useState<PdfExtractResult | null>(null);
@@ -469,6 +485,7 @@ export default function Home() {
               setParcelData({
                 localCoords: centered,
                 bboxAspect: (Math.max(...xs) - Math.min(...xs)) / Math.max(Math.max(...ys) - Math.min(...ys), 0.1),
+                originOffset: [cx, cy],
               });
               setSiteFromOSM(true);
               // 대지 건물은 주변 건물 목록에서 제외하고 좌표를 parcel 기준으로 통일
@@ -572,6 +589,20 @@ export default function Home() {
         addr: address,
         radius: String(cadRadius),
       });
+      const 대지면적 = editParams.대지면적;
+      const s = Math.sqrt(대지면적) / 2;
+      const fallbackCoords: [number, number][] = [[-s, -s], [s, -s], [s, s], [-s, s]];
+      const siteCoords = parcelData?.localCoords ?? fallbackCoords;
+      const [offsetX, offsetY] = parcelData?.originOffset ?? [0, 0];
+      const setbackRules = computed ? extractSetbackRules(computed.scaleItems) : { buildingLine: 0, adjacent: 0, max: 0 };
+      params.set("site", JSON.stringify(siteCoords));
+      params.set("offsetX", String(offsetX));
+      params.set("offsetY", String(offsetY));
+      params.set("buildingArea", String(computed?.areas?.최대건축면적 ?? editParams.건축면적입력 ?? 0));
+      params.set("floors", String(Math.max(editParams.층수, 1)));
+      params.set("setback", String(setbackRules.max));
+      params.set("buildingLineSetback", String(setbackRules.buildingLine));
+      params.set("adjacentSetback", String(setbackRules.adjacent));
       const res = await fetch(`/api/objexport?${params}`);
       if (!res.ok) { alert("OBJ 생성 실패"); return; }
       const blob = await res.blob();
@@ -1271,6 +1302,7 @@ export default function Home() {
                 const fallbackCoords: [number, number][] = [[-s, -s], [s, -s], [s, s], [-s, s]];
                 const coords = parcelData?.localCoords ?? fallbackCoords;
                 const aspect = parcelData?.bboxAspect ?? 1.0;
+                const setbackRules = extractSetbackRules(computed.scaleItems);
                 return (
                   <div className="mt-2">
                     <BuildingViewer3D
@@ -1279,6 +1311,8 @@ export default function Home() {
                       층수={층수}
                       대지면적={대지면적}
                       bboxAspect={aspect}
+                      setbackMeters={setbackRules.max}
+                      setbackRules={setbackRules}
                       surroundings={surroundings ?? undefined}
                       zoneName={r.baseData?.zoneName ?? r.zoneName ?? undefined}
                       lat={r.coords?.lat}

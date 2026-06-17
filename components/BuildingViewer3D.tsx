@@ -6,6 +6,7 @@ import * as THREE from "three";
 import { useMemo, useRef, useEffect, useState } from "react";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import { createSafeMassFootprint, createSetbackEdgeClearances } from "@/lib/mass-study";
 
 export interface ContextBuilding { coords: [number, number][]; height: number; }
 export interface ContextRoad    { coords: [number, number][]; width: number; }
@@ -20,6 +21,11 @@ export interface BuildingViewer3DProps {
   층수: number;
   대지면적: number;
   bboxAspect: number;
+  setbackMeters?: number;
+  setbackRules?: {
+    buildingLine: number;
+    adjacent: number;
+  };
   surroundings?: SurroundingContext;
   zoneName?: string;
   lat?: number;
@@ -35,14 +41,6 @@ function isSunZone(z?: string) {
 }
 
 // ── 유틸 ────────────────────────────────────────────────────────
-function centroid(pts: [number, number][]): [number, number] {
-  const n = pts.length;
-  return [pts.reduce((s, p) => s + p[0], 0) / n, pts.reduce((s, p) => s + p[1], 0) / n];
-}
-function shrinkPolygon(pts: [number, number][], factor: number): [number, number][] {
-  const [cx, cy] = centroid(pts);
-  return pts.map(([x, y]) => [cx + (x - cx) * factor, cy + (y - cy) * factor]);
-}
 function signedArea(pts: [number, number][]): number {
   let a = 0;
   for (let i = 0; i < pts.length; i++) {
@@ -129,15 +127,14 @@ function ParcelOutline({ pts }: { pts: [number, number][] }) {
 // 건축법 시행령 §86:
 //   topH ≤ 10m → 북경계에서 1.5m 이상 (수직 허용)
 //   topH > 10m → 북경계에서 topH/2 이상 (사선 적용)
-function BuildingMass({ pts, 건축면적, 대지면적, 층수, sunApplicable }: {
-  pts: [number, number][]; 건축면적: number; 대지면적: number; 층수: number; sunApplicable: boolean;
+function BuildingMass({ sitePts, footprint, 층수, sunApplicable }: {
+  sitePts: [number, number][]; footprint: [number, number][]; 층수: number; sunApplicable: boolean;
 }) {
-  const parcelNorthY = useMemo(() => Math.max(...pts.map(p => p[1])), [pts]);
+  const parcelNorthY = useMemo(() => Math.max(...sitePts.map(p => p[1])), [sitePts]);
 
   const { floorGeos, slabGeos } = useMemo(() => {
-    const factor   = 대지면적 > 0 && 건축면적 > 0 ? Math.max(Math.sqrt(건축면적 / 대지면적), 0.1) : 0.7;
-    const buildPts = shrinkPolygon(pts, Math.min(factor, 0.95));
-    const slabPts  = shrinkPolygon(pts, Math.min(factor + 0.03, 0.97));
+    const buildPts = footprint;
+    const slabPts = footprint;
 
     // 층 상단 높이에 따른 북측 최대 Y (일조 적용 시)
     // 10m 이하: 1.5m 고정 (수직벽 허용), 10m 초과: 높이/2
@@ -162,7 +159,7 @@ function BuildingMass({ pts, 건축면적, 대지면적, 층수, sunApplicable }
       slabGeos: Array.from({ length: 층수 + 1 }, (_, i) =>
         makeGeo(slabPts, i * FLOOR_H, 0.12)),
     };
-  }, [pts, 건축면적, 대지면적, 층수, sunApplicable, parcelNorthY]);
+  }, [footprint, 층수, sunApplicable, parcelNorthY]);
 
   // 아래층→위층으로 살짝 밝아지는 그라데이션 (건축 다이어그램 스타일)
   const floorColor = (i: number) => {
@@ -204,6 +201,14 @@ function VolumeGuide({ pts, 층수 }: { pts: [number, number][]; 층수: number 
       <Edges threshold={15} color="#3366bb" />
     </mesh>
   );
+}
+
+function MassFootprintOutline({ pts }: { pts: [number, number][] }) {
+  const points = useMemo(
+    () => [...pts, pts[0]].map(([x, y]) => new THREE.Vector3(x, 0.18, -y)),
+    [pts],
+  );
+  return <Line points={points} color="#16a34a" lineWidth={2.2} />;
 }
 
 // ── 정북일조 필수 이격 표시선 ────────────────────────────────────
@@ -268,12 +273,29 @@ function SunLimitLine({ localCoords, totalH }: {
 }
 
 // ── TOP VIEW 치수선 ─────────────────────────────────────────────
-function TopViewDimensions({ localCoords, 건축면적, 대지면적 }: {
-  localCoords: [number, number][]; 건축면적: number; 대지면적: number;
+function DimensionLine({ p1, p2, label, col = "#1d4ed8" }: {
+  p1: THREE.Vector3; p2: THREE.Vector3; label: string; col?: string;
 }) {
-  const factor   = 대지면적 > 0 && 건축면적 > 0 ? Math.max(Math.sqrt(건축면적 / 대지면적), 0.1) : 0.7;
+  const mid = new THREE.Vector3().lerpVectors(p1, p2, 0.5);
+  return (
+    <group>
+      <Line points={[p1, p2]} color={col} lineWidth={1.5} dashed dashScale={4} />
+      <Html position={[mid.x, mid.y, mid.z]} center>
+        <div style={{
+          background: "white", borderRadius: 3, padding: "1px 5px",
+          fontSize: 10, fontWeight: 700, color: col,
+          boxShadow: "0 1px 3px rgba(0,0,0,.2)", whiteSpace: "nowrap",
+        }}>{label}</div>
+      </Html>
+    </group>
+  );
+}
+
+function TopViewDimensions({ localCoords, footprint }: {
+  localCoords: [number, number][]; footprint: [number, number][];
+}) {
   const bb       = bboxOf(localCoords);
-  const buildPts = shrinkPolygon(localCoords, Math.min(factor, 0.95));
+  const buildPts = footprint;
   const bb2      = bboxOf(buildPts);
 
   // local(x,y) → world(x, height, -y)
@@ -289,52 +311,34 @@ function TopViewDimensions({ localCoords, 건축면적, 대지면적 }: {
   const bdW = (bb2.maxX - bb2.minX).toFixed(1);
   const bdD = (bb2.maxY - bb2.minY).toFixed(1);
 
-  const DimLine = ({ p1, p2, label, col = "#1d4ed8" }: {
-    p1: THREE.Vector3; p2: THREE.Vector3; label: string; col?: string;
-  }) => {
-    const mid = new THREE.Vector3().lerpVectors(p1, p2, 0.5);
-    return (
-      <group>
-        <Line points={[p1, p2]} color={col} lineWidth={1.5} dashed dashScale={4} />
-        <Html position={[mid.x, mid.y, mid.z]} center>
-          <div style={{
-            background: "white", borderRadius: 3, padding: "1px 5px",
-            fontSize: 10, fontWeight: 700, color: col,
-            boxShadow: "0 1px 3px rgba(0,0,0,.2)", whiteSpace: "nowrap",
-          }}>{label}</div>
-        </Html>
-      </group>
-    );
-  };
-
   return (
     <group>
       {/* North setback */}
-      <DimLine
+      <DimensionLine
         p1={W(bb.maxX + gap, bb.maxY)} p2={W(bb.maxX + gap, bb2.maxY)}
         label={`N: ${nSb}m`} col="#ef4444"
       />
       {/* South setback */}
-      <DimLine
+      <DimensionLine
         p1={W(bb.maxX + gap, bb2.minY)} p2={W(bb.maxX + gap, bb.minY)}
         label={`S: ${sSb}m`} col="#6366f1"
       />
       {/* East setback */}
-      <DimLine
+      <DimensionLine
         p1={W(bb2.maxX, bb.minY - gapY)} p2={W(bb.maxX, bb.minY - gapY)}
         label={`E: ${eSb}m`} col="#0891b2"
       />
       {/* West setback */}
-      <DimLine
+      <DimensionLine
         p1={W(bb.minX, bb.minY - gapY)} p2={W(bb2.minX, bb.minY - gapY)}
         label={`W: ${wSb}m`} col="#0891b2"
       />
       {/* Building size */}
-      <DimLine
+      <DimensionLine
         p1={W(bb2.minX, bb.minY - gapY * 2)} p2={W(bb2.maxX, bb.minY - gapY * 2)}
         label={`건물 ${bdW}m`} col="#15803d"
       />
-      <DimLine
+      <DimensionLine
         p1={W(bb.maxX + gap * 2, bb2.minY)} p2={W(bb.maxX + gap * 2, bb2.maxY)}
         label={`건물 ${bdD}m`} col="#15803d"
       />
@@ -465,10 +469,23 @@ interface SceneProps extends BuildingViewer3DProps {
   controlsRef: React.RefObject<OrbitControlsImpl | null>;
 }
 
-function Scene({ localCoords, 건축면적, 층수, 대지면적, surroundings, zoneName, lat, lng, topView, controlsRef }: SceneProps) {
+function Scene({ localCoords, 건축면적, 층수, 대지면적, setbackMeters = 0, setbackRules, surroundings, zoneName, lat, lng, topView, controlsRef }: SceneProps) {
   const totalH = 층수 * FLOOR_H;
   const sc     = Math.sqrt(대지면적) * 1.8;
   const sunApplicable = isSunZone(zoneName);
+  const roads = surroundings?.roads;
+  const edgeClearances = useMemo(() => {
+    if (!setbackRules || !roads?.length) return undefined;
+    return createSetbackEdgeClearances(localCoords, roads, setbackRules);
+  }, [localCoords, setbackRules, roads]);
+  const massResult = useMemo(
+    () => createSafeMassFootprint(localCoords, 건축면적 || 대지면적 * 0.7, {
+      gridSteps: 21,
+      minClearance: setbackMeters,
+      edgeClearances,
+    }),
+    [localCoords, 건축면적, 대지면적, setbackMeters, edgeClearances],
+  );
 
   // OrbitControls ref이 마운트된 후 카메라 초기 위치도 설정
   useEffect(() => {
@@ -483,7 +500,7 @@ function Scene({ localCoords, 건축면적, 층수, 대지면적, surroundings, 
       c.target.set(0, totalH * 0.4, 0);
     }
     c.update();
-  }, [topView, sc, totalH]);
+  }, [controlsRef, topView, sc, totalH]);
 
   // 최초 마운트 시 카메라 타겟 설정 (OrbitControls가 렌더 후 ref에 연결됨)
   useEffect(() => {
@@ -494,7 +511,7 @@ function Scene({ localCoords, 건축면적, 층수, 대지면적, surroundings, 
       c.update();
     }, 50);
     return () => clearTimeout(timer);
-  }, [totalH]);
+  }, [controlsRef, totalH]);
 
   return (
     <>
@@ -540,15 +557,16 @@ function Scene({ localCoords, 건축면적, 층수, 대지면적, surroundings, 
       <ParcelMesh pts={localCoords} />
       <ParcelGrid pts={localCoords} />
       {topView && <ParcelOutline pts={localCoords} />}
-      <VolumeGuide pts={localCoords} 층수={층수} />
-      <BuildingMass pts={localCoords} 건축면적={건축면적} 대지면적={대지면적} 층수={층수} sunApplicable={sunApplicable} />
+      <VolumeGuide pts={massResult.footprint} 층수={층수} />
+      {topView && <MassFootprintOutline pts={massResult.footprint} />}
+      <BuildingMass sitePts={localCoords} footprint={massResult.footprint} 층수={층수} sunApplicable={sunApplicable} />
 
       {/* 정북일조 필수 이격선 (TOP VIEW 전용) */}
       {sunApplicable && topView && <SunLimitLine localCoords={localCoords} totalH={totalH} />}
 
       {/* TOP VIEW 치수선 */}
       {topView && (
-        <TopViewDimensions localCoords={localCoords} 건축면적={건축면적} 대지면적={대지면적} />
+        <TopViewDimensions localCoords={localCoords} footprint={massResult.footprint} />
       )}
 
       {!topView && (
@@ -567,7 +585,7 @@ function Scene({ localCoords, 건축면적, 층수, 대지면적, surroundings, 
 const LEGEND_3D = [
   { color: "#f5d87c", h: 1.5, label: "검토 대지" },
   { color: "#edf2fa", h: 12,  label: "계획 건물" },
-  { color: "#3366bb", h: 12,  label: "법적 한계", opacity: 0.35 },
+  { color: "#3366bb", h: 12,  label: "안전 건축범위", opacity: 0.35 },
 ];
 const LEGEND_SURR = [
   { color: "#b8bec6", h: 12, label: "주변 건물", opacity: 0.75 },
@@ -576,11 +594,24 @@ const LEGEND_SURR = [
 
 // ── 공개 컴포넌트 ─────────────────────────────────────────────────
 export default function BuildingViewer3D(props: BuildingViewer3DProps) {
-  const { 대지면적, 층수, surroundings, zoneName } = props;
+  const { localCoords, 건축면적, 대지면적, 층수, setbackMeters = 0, setbackRules, surroundings, zoneName } = props;
   const sc     = Math.sqrt(대지면적) * 1.8;
   const totalH = 층수 * FLOOR_H;
   const hasSurr = !!(surroundings?.buildings.length || surroundings?.roads.length);
   const isSun  = isSunZone(zoneName);
+  const roads = surroundings?.roads;
+  const edgeClearances = useMemo(() => {
+    if (!setbackRules || !roads?.length) return undefined;
+    return createSetbackEdgeClearances(localCoords, roads, setbackRules);
+  }, [localCoords, setbackRules, roads]);
+  const massResult = useMemo(
+    () => createSafeMassFootprint(localCoords, 건축면적 || 대지면적 * 0.7, {
+      gridSteps: 21,
+      minClearance: setbackMeters,
+      edgeClearances,
+    }),
+    [localCoords, 건축면적, 대지면적, setbackMeters, edgeClearances],
+  );
 
   const [topView, setTopView] = useState(false);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
@@ -637,6 +668,18 @@ export default function BuildingViewer3D(props: BuildingViewer3DProps) {
         <div className="bg-[#1F4E79]/80 backdrop-blur text-white text-[10px] font-semibold rounded-md px-2.5 py-1.5 shadow leading-snug">
           <div className="text-white/60 text-[9px] font-normal mb-0.5">계획 건물</div>
           <div>{층수}층 · {totalH.toFixed(1)}m</div>
+          <div className="text-emerald-200 text-[9px] mt-0.5">
+            footprint {massResult.actualArea.toFixed(0)}㎡
+          </div>
+          {setbackMeters > 0 && (
+            <div className="text-blue-100 text-[9px] mt-0.5">공지 이격 {setbackMeters.toFixed(1)}m 반영</div>
+          )}
+          {edgeClearances && (
+            <div className="text-blue-100 text-[9px] mt-0.5">도로변/인접대지 변별 적용</div>
+          )}
+          {!massResult.fitsRequestedArea && (
+            <div className="text-amber-200 text-[9px] mt-0.5">대지 내 안전범위로 축소</div>
+          )}
           {isSun && <div className="text-orange-300 text-[9px] mt-0.5">⚡ 정북일조 적용</div>}
         </div>
       </div>

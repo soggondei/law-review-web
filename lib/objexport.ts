@@ -1,11 +1,16 @@
 export type ObjPolygon = [number, number][];
 export type ObjPolyline = [number, number][];
+export type ObjExtrusion = {
+  footprint: ObjPolygon;
+  height: number;
+};
 
 export type ObjGroup = {
   name: string;
   polygons?: ObjPolygon[];
   polylines?: ObjPolyline[];
   polylineWidth?: number;
+  extrusions?: ObjExtrusion[];
 };
 
 type Point = [number, number];
@@ -23,6 +28,10 @@ function formatDate(date = new Date()) {
 
 function emitVertex(lines: string[], point: Point) {
   lines.push(`v ${formatNumber(point[0])} ${formatNumber(point[1])} 0`);
+}
+
+function emitVertex3(lines: string[], point: Point, z: number) {
+  lines.push(`v ${formatNumber(point[0])} ${formatNumber(point[1])} ${formatNumber(z)}`);
 }
 
 function isUsablePoint(point: Point | undefined): point is Point {
@@ -57,6 +66,34 @@ export function buildObj(
 
       for (let i = 1; i < pts.length - 1; i += 1) {
         lines.push(`f ${start} ${start + i} ${start + i + 1}`);
+      }
+    }
+
+    for (const extrusion of group.extrusions ?? []) {
+      const pts = sanitizePoints(extrusion.footprint);
+      const height = Number.isFinite(extrusion.height) ? Math.max(0, extrusion.height) : 0;
+      if (pts.length < 3 || height <= 0) continue;
+
+      const bottomStart = vertexIndex;
+      for (const point of pts) {
+        emitVertex3(lines, point, 0);
+        vertexIndex += 1;
+      }
+
+      const topStart = vertexIndex;
+      for (const point of pts) {
+        emitVertex3(lines, point, height);
+        vertexIndex += 1;
+      }
+
+      for (let i = 1; i < pts.length - 1; i += 1) {
+        lines.push(`f ${bottomStart} ${bottomStart + i + 1} ${bottomStart + i}`);
+        lines.push(`f ${topStart} ${topStart + i} ${topStart + i + 1}`);
+      }
+
+      for (let i = 0; i < pts.length; i += 1) {
+        const j = (i + 1) % pts.length;
+        lines.push(`f ${bottomStart + i} ${bottomStart + j} ${topStart + j} ${topStart + i}`);
       }
     }
 
