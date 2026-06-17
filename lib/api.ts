@@ -19,12 +19,16 @@ export async function fetchAddressInfo(keyword: string) {
   const juso = data?.results?.juso?.[0];
   if (!juso) return null;
 
-  // PNU 19자리: bdMgtSn(건물관리번호 25자리) 앞 19자리
   // bdMgtSn = 법정동코드(10) + 산여부(1:일반=1,산=2) + 본번(4) + 부번(4) + 건물순번(6)
+  // 건축물대장 API는 법정동코드 기반 sigunguCd/bjdongCd를 사용해야 함
+  // admCd(행정동코드)의 뒤 5자리는 법정동코드와 다를 수 있으므로 bdMgtSn에서 추출
   const bd  = juso.bdMgtSn ?? "";
   const pnu = bd.length >= 19 ? bd.slice(0, 19) : null;
   const bun = bd.length >= 15 ? bd.slice(11, 15) : "0000";
   const ji  = bd.length >= 19 ? bd.slice(15, 19) : "0000";
+  // 법정동코드 기반 시군구·동 코드 (건축물대장 API용)
+  const sigunguCd = bd.length >= 5  ? bd.slice(0, 5)  : juso.admCd?.slice(0, 5) ?? "";
+  const bjdongCd  = bd.length >= 10 ? bd.slice(5, 10) : juso.admCd?.slice(5, 10) ?? "";
 
   return {
     roadAddr:  juso.roadAddr,
@@ -36,34 +40,46 @@ export async function fetchAddressInfo(keyword: string) {
     rnMgtSn:   juso.rnMgtSn,
     bdMgtSn:   bd,
     pnu,
-    bun,  // 건축물대장 조회용
+    bun,
     ji,
+    sigunguCd,  // 법정동코드 기반 시군구코드 (건축물대장 API용)
+    bjdongCd,   // 법정동코드 기반 법정동코드 (건축물대장 API용)
   };
 }
 
-// ── 건축물대장 ────────────────────────────────────────────────────────────────
+// ── 건축물대장 표제부 ─────────────────────────────────────────────────────────
 export async function fetchBuildingInfo(sigunguCd: string, bjdongCd: string, bun: string, ji: string) {
   const params = new URLSearchParams({
     serviceKey: BLDRGST_KEY,
     sigunguCd, bjdongCd, bun: bun.padStart(4,"0"), ji: ji.padStart(4,"0"),
-    numOfRows: "1", pageNo: "1", _type: "json",
+    numOfRows: "5", pageNo: "1", _type: "json",
   });
   try {
     const res  = await fetch(`https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo?${params}`);
     const data = await res.json();
     const item = data?.response?.body?.items?.item;
-    const it   = Array.isArray(item) ? item[0] : item;
+    if (!item) return null;
+    // 복수 결과 중 주건물(mainAtchGbCd=0) 우선, 없으면 첫 번째
+    const arr = Array.isArray(item) ? item : [item];
+    const it  = arr.find((x: any) => x.mainAtchGbCd === "0" || x.mainAtchGbCdNm === "주건물") ?? arr[0];
     if (!it) return null;
     return {
-      대지면적:  parseFloat(it.platArea)  || null,
-      연면적:    parseFloat(it.totArea)   || null,
-      층수:      parseInt(it.grndFlrCnt)  || null,
-      지하층수:  parseInt(it.ugrndFlrCnt) || null,
-      세대수:    parseInt(it.hhldCnt)     || null,
-      높이:      parseFloat(it.heit)      || null,
-      구조:      it.strctCdNm             ?? null,  // e.g. "철근콘크리트구조"
-      주용도:    it.mainPurpsCdNm         ?? null,
-      준공일:    it.useAprDay ? String(it.useAprDay) : null,
+      대지면적:   parseFloat(it.platArea)   || null,
+      연면적:     parseFloat(it.totArea)    || null,
+      층수:       parseInt(it.grndFlrCnt)   || null,
+      지하층수:   parseInt(it.ugrndFlrCnt)  || null,
+      세대수:     parseInt(it.hhldCnt)      || null,
+      높이:       parseFloat(it.heit)       || null,
+      구조:       it.strctCdNm              ?? null,
+      주용도:     (it.mainPurpsCdNm || it.etcPurps || null), // etcPurps fallback
+      준공일:     it.useAprDay ? String(it.useAprDay) : null,
+      주차대수:   parseInt(it.totPkngCnt)   || null,
+      승용엘리베이터: parseInt(it.rideUseElvtCnt) || null,
+      건물명:     it.bldNm                  || null,
+      대장종류:   it.regstrKindCdNm         || null,  // "일반건축물대장" | "집합건축물대장"
+      건폐율:     parseFloat(it.bcRat)      || null,  // 대장 기재 건폐율
+      용적률:     parseFloat(it.vlRat)      || null,  // 대장 기재 용적률
+      지번:       it.platPlc                || null,  // 대지위치(지번주소)
     };
   } catch { return null; }
 }
@@ -303,4 +319,65 @@ export function getOrdinanceRates(siNm: string, zoneName: string): ZoneRate | nu
 // 하위 호환
 export function getSeoulOrdinance(zoneName: string) {
   return ORDINANCES["서울특별시"]?.[zoneName] ?? null;
+}
+
+// ── 건축물대장 층별개요 ────────────────────────────────────────────────────────
+export type BuildingFloor = {
+  층: string;
+  층수: number;
+  용도: string;
+  면적: number;
+};
+
+function formatFloorName(flrNoNm: string | undefined, flrNo: string | number): string {
+  const raw = (flrNoNm ?? "").trim();
+  if (raw) return raw;
+  const n = parseInt(String(flrNo)) || 0;
+  if (n < 0) return `지${-n}층`;
+  if (n === 0) return "지상층";
+  return `${n}층`;
+}
+
+export async function fetchBuildingFloors(
+  sigunguCd: string, bjdongCd: string, bun: string, ji: string,
+): Promise<BuildingFloor[]> {
+  const all: BuildingFloor[] = [];
+  let page = 1;
+  // 페이지네이션: 층별개요가 100건 초과하는 건물 대응
+  while (page <= 5) {
+    const params = new URLSearchParams({
+      serviceKey: BLDRGST_KEY,
+      sigunguCd, bjdongCd,
+      bun: bun.padStart(4, "0"), ji: ji.padStart(4, "0"),
+      numOfRows: "100", pageNo: String(page), _type: "json",
+    });
+    let data: any;
+    try {
+      const res = await fetch(`https://apis.data.go.kr/1613000/BldRgstHubService/getBrFlrOulnInfo?${params}`);
+      data = await res.json();
+    } catch { break; }
+    const body = data?.response?.body;
+    const totalCount = body?.totalCount ?? 0;
+    const raw = body?.items?.item;
+    if (page === 1) {
+      console.log("[fetchBuildingFloors] totalCount:", totalCount, "| items:", raw ? (Array.isArray(raw) ? raw.length : 1) : 0, "| resultCode:", data?.response?.header?.resultCode);
+    }
+    if (!raw) break;
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const mapped = arr.map((it: any) => ({
+      층:  formatFloorName(it.flrNoNm, it.flrNo),
+      층수: parseInt(it.flrNo) || 0,
+      용도: ((it.mainPurpsCdNm || it.etcPurps) ?? "").trim(),
+      // strArea(구조면적)가 0이면 flrArea(층면적) fallback
+      면적: parseFloat(it.strArea) || parseFloat(it.flrArea) || 0,
+    }));
+    if (page === 1 && mapped.length > 0) {
+      console.log("[fetchBuildingFloors] sample[0]:", JSON.stringify(mapped[0]));
+    }
+    all.push(...mapped);
+    if (arr.length < 100) break;
+    page++;
+  }
+  // 면적이 0인 경우도 포함 — 층 목록 자체는 표시해야 하며 면적은 표제부 연면적으로 fallback
+  return all.sort((a, b) => a.층수 - b.층수);
 }
