@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
-import { judgeScaleItems, judgeDesignItems, judgePermitItems, calcAreas, calcParking, type Confidence } from "@/lib/judge";
+import { judgeScaleItems, judgeDesignItems, judgePermitItems, calcAreas, calcParking, type Confidence, type LegalScope } from "@/lib/judge";
 import { generateSchedule } from "@/lib/schedule";
 import type { PdfExtractResult } from "@/app/api/pdf-extract/route";
 
@@ -26,7 +26,20 @@ const LandUseMap = dynamic(() => import("@/components/LandUseMap"), {
 
 const PdfExtractPanel = dynamic(() => import("@/components/PdfExtractPanel"), { ssr: false });
 
-type Item = { category: string; 항목: string; 법령: string; 내용: string; 해당여부: string; 설계기준?: string | null; confidence?: Confidence; };
+type Item = {
+  category: string;
+  항목: string;
+  법령: string;
+  내용: string;
+  해당여부: string;
+  설계기준?: string | null;
+  confidence?: Confidence;
+  scope?: LegalScope;
+  sourceUrl?: string;
+  sourceName?: string;
+  requiresInput?: string[];
+  auditWarnings?: string[];
+};
 
 const USE_LIST: { group: string; items: string[] }[] = [
   { group: "단독주택",          items: ["단독주택", "다중주택", "다가구주택"] },
@@ -145,6 +158,15 @@ function getLawUrl(법령: string): string | null {
 }
 
 function ItemTable({ items }: { items: Item[] }) {
+  const scopeLabel: Partial<Record<LegalScope, string>> = {
+    site: "대지",
+    building_interior: "건축물 내부",
+    fire: "소방",
+    accessibility: "장애인",
+    ordinance: "조례",
+    parking: "주차",
+    permit: "인허가",
+  };
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 mt-2">
       <table className="w-full text-[13px]">
@@ -161,6 +183,20 @@ function ItemTable({ items }: { items: Item[] }) {
               <td className="px-3 py-2 bg-blue-50/50 border-r border-gray-100 align-top">
                 <div className="text-[10px] text-blue-500">{item.category}.</div>
                 <div className="font-medium text-slate-700">{item.항목}</div>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {item.scope && scopeLabel[item.scope] && (
+                    <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500">{scopeLabel[item.scope]}</span>
+                  )}
+                  {item.scope === "parking" && (
+                    <span className={`inline-block rounded px-1.5 py-0.5 text-[9px] font-medium ${
+                      item.confidence === "confirmed"
+                        ? "bg-green-50 text-green-700 border border-green-200"
+                        : "bg-red-50 text-red-600 border border-red-100"
+                    }`}>
+                      {item.confidence === "confirmed" ? "조례 적용" : "조례 확인 필요"}
+                    </span>
+                  )}
+                </div>
                 <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">
                   {(() => { const url = getLawUrl(item.법령); return url ? <a href={url} target="_blank" rel="noreferrer" className="hover:text-blue-500 hover:underline">{item.법령} ↗</a> : item.법령; })()}
                 </div>
@@ -168,11 +204,22 @@ function ItemTable({ items }: { items: Item[] }) {
               <td className="px-3 py-2 text-gray-600 align-top">
                 <div>{item.내용}</div>
                 {item.설계기준 && <div className="mt-1 text-[11px] text-blue-600 bg-blue-50 rounded px-2 py-1">↳ 설계기준: {item.설계기준}</div>}
+                {item.requiresInput?.length ? (
+                  <div className="mt-1 text-[11px] text-amber-700 bg-amber-50 rounded px-2 py-1">
+                    확인 필요: {item.requiresInput.join(" · ")}
+                  </div>
+                ) : null}
+                {item.sourceUrl && (
+                  <a href={item.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-[10px] text-gray-400 hover:text-blue-500 hover:underline">
+                    공식 출처 확인 ↗
+                  </a>
+                )}
               </td>
               <td className="px-2 py-2 align-top">
                 <span className={`inline-block px-2 py-1 rounded text-[11px] font-medium ${badgeColor(item.해당여부)}`}>{item.해당여부}</span>
                 {item.confidence === "estimated" && <span className="block mt-1 text-[10px] text-amber-600 bg-amber-50 rounded px-1.5 py-0.5">🟡 추정값</span>}
                 {item.confidence === "unverified" && <span className="block mt-1 text-[10px] text-red-500 bg-red-50 rounded px-1.5 py-0.5">🔴 미확인</span>}
+                {item.confidence === "confirmed" && item.scope === "parking" && <span className="block mt-1 text-[10px] text-green-700 bg-green-50 rounded px-1.5 py-0.5">확인 조례</span>}
               </td>
             </tr>
           ))}

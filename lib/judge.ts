@@ -26,6 +26,17 @@ type ParkingOrdinanceJson = Omit<ParkingOrdinance, "area"> & {
 type ParkingOptions = {
   오피스텔전용면적?: number;
 };
+type ParkingCalculation = {
+  대수: number | null;
+  장애인대수?: number;
+  기준: string;
+  근거: string;
+  판단불가?: boolean;
+  ordinanceRegion?: string;
+  ordinanceStatus: "confirmed" | "unverified" | "missing";
+  sourceUrl?: string;
+  roundingRule?: string;
+};
 
 function nationalLawArea(): Record<string, ParkingAreaRule> {
   const note = "조례 미확인 — 법정 기준 잠정 적용";
@@ -209,7 +220,11 @@ function getDisabledParkingCount(total: number, ordinance: ParkingOrdinance) {
   return Math.max(1, Math.ceil(total * rule.rate));
 }
 
-export function calcParking(용도: string, 연면적: number, 세대수 = 0, siNm = "", options: ParkingOptions = {}) {
+function describeRounding(rounding?: ParkingRounding) {
+  return rounding === "half-up" ? "0.5 이상 반올림" : "소수점 올림";
+}
+
+export function calcParking(용도: string, 연면적: number, 세대수 = 0, siNm = "", options: ParkingOptions = {}): ParkingCalculation | null {
   if (!isPositive(연면적)) return null;
   const local = getParkingOrdinance(siNm);
   if (!local) {
@@ -218,9 +233,15 @@ export function calcParking(용도: string, 연면적: number, 세대수 = 0, si
       기준: "해당 지자체 조례 기준 미등록",
       근거: "지자체 주차장 설치 및 관리 조례 확인 필요",
       판단불가: true,
+      ordinanceStatus: "missing",
     };
   }
   const rules = local.ordinance;
+  const ordinanceMeta = {
+    ordinanceRegion: local.key,
+    ordinanceStatus: rules.confidence === "confirmed" ? "confirmed" as const : "unverified" as const,
+    sourceUrl: rules.sourceUrl,
+  };
 
   if (용도.includes("오피스텔")) {
     const 오피스텔전용면적 = options.오피스텔전용면적;
@@ -235,6 +256,9 @@ export function calcParking(용도: string, 연면적: number, 세대수 = 0, si
         : "오피스텔 전용면적 미입력 — 보수 기준(전용 30㎡ 초과, 120㎡당 1대) 적용",
       근거: "주차장법 시행령 별표1 제1호 나목",
       판단불가: !hasExclusiveArea,
+      ...ordinanceMeta,
+      ordinanceStatus: hasExclusiveArea ? ordinanceMeta.ordinanceStatus : "unverified",
+      roundingRule: describeRounding(),
     };
   }
 
@@ -250,6 +274,10 @@ export function calcParking(용도: string, 연면적: number, 세대수 = 0, si
           장애인대수: getDisabledParkingCount(적용대수, rules),
           기준: `세대당 ${std.perUnit}대 × ${세대수}세대 = ${세대기준대수}대 (면적기준 ${면적기준대수}대, 큰 값 적용)`,
           근거: `${std.근거} (${local.key})`,
+          ...ordinanceMeta,
+          ordinanceStatus: std.confidence === "confirmed" ? ordinanceMeta.ordinanceStatus : "unverified",
+          sourceUrl: std.sourceUrl ?? ordinanceMeta.sourceUrl,
+          roundingRule: describeRounding(),
         };
       }
       return {
@@ -257,6 +285,10 @@ export function calcParking(용도: string, 연면적: number, 세대수 = 0, si
         장애인대수: getDisabledParkingCount(면적기준대수, rules),
         기준: `연면적 75㎡당 1대 (세대수 입력 시 세대당 기준 적용)`,
         근거: `${std.근거} (${local.key})`,
+        ...ordinanceMeta,
+        ordinanceStatus: std.confidence === "confirmed" ? ordinanceMeta.ordinanceStatus : "unverified",
+        sourceUrl: std.sourceUrl ?? ordinanceMeta.sourceUrl,
+        roundingRule: describeRounding(),
       };
     }
   }
@@ -268,6 +300,10 @@ export function calcParking(용도: string, 연면적: number, 세대수 = 0, si
         장애인대수: getDisabledParkingCount(대수, rules),
         기준: `연면적 ${std.per}㎡당 1대${std.note ? ` (${std.note})` : ""}`,
         근거: `${std.근거} (${local.key})`,
+        ...ordinanceMeta,
+        ordinanceStatus: std.confidence === "confirmed" ? ordinanceMeta.ordinanceStatus : "unverified",
+        sourceUrl: std.sourceUrl ?? ordinanceMeta.sourceUrl,
+        roundingRule: describeRounding(std.rounding),
       };
     }
   }
@@ -276,6 +312,8 @@ export function calcParking(용도: string, 연면적: number, 세대수 = 0, si
     기준: "해당 용도 주차 기준 미등록",
     근거: `${local.key} 주차장 설치 및 관리 조례 확인 필요`,
     판단불가: true,
+    ...ordinanceMeta,
+    ordinanceStatus: "unverified",
   };
 }
 
@@ -688,12 +726,26 @@ export function judgeDesignItems(params: {
   const parkingCount = typeof pk?.대수 === "number" ? pk.대수 : null;
   const 장애인수 = typeof pk?.장애인대수 === "number" ? pk.장애인대수 : 0;
   const 복합용도 = 용도.includes(" + ");
-  items.push({ category:"나", 항목:"부설주차장", 법령:"주차장법 시행령 제6조",
+  const parkingBadge = pk?.ordinanceStatus === "confirmed"
+    ? `${pk.ordinanceRegion} 조례 적용`
+    : pk?.ordinanceStatus === "missing"
+      ? "조례 DB 미등록"
+      : pk?.ordinanceRegion
+        ? `${pk.ordinanceRegion} 조례 미확인`
+        : "조례 확인 필요";
+  items.push({ ruleId:"attached-parking", category:"나", 항목:"부설주차장", 법령:"주차장법 시행령 제6조",
     내용: parkingCount !== null
-      ? `**${용도}** ${면}㎡ → 최소 **${parkingCount}대** (${pk?.근거}). **장애인 ${장애인수}면** 이상${복합용도 ? " ⚠️ 복합용도: 용도별 면적 배분 후 각 기준 재산정 필요" : ""}`
-      : "용도와 연면적이 확인되어야 부설주차장 대수 산정 가능",
+      ? `**${용도}** ${면}㎡ → 최소 **${parkingCount}대** (${parkingBadge}, ${pk?.근거}). **장애인 ${장애인수}면** 이상${복합용도 ? " ⚠️ 복합용도: 용도별 면적 배분 후 각 기준 재산정 필요" : ""}`
+      : `${parkingBadge} — 용도와 연면적, 지자체 조례가 확인되어야 부설주차장 대수 산정 가능`,
     해당여부: parkingCount !== null && !pk?.판단불가 ? Y(`일반 ${parkingCount}대, 장애인 ${장애인수}면 이상`) : W(pk?.기준 ?? "판단불가 — 용도/연면적/지자체 조례 확인 필요"),
-    설계기준: parkingCount !== null ? `일반 2.5m×5.0m, 장애인 3.3m×5.0m${복합용도 ? ". 복합용도 시 용도별 면적 배분 후 합산 산정" : ""} / ${pk?.근거}` : pk?.근거 ?? null });
+    설계기준: parkingCount !== null
+      ? `일반 2.5m×5.0m, 장애인 3.3m×5.0m${복합용도 ? ". 복합용도 시 용도별 면적 배분 후 합산 산정" : ""} / ${pk?.근거} / 반올림: ${pk?.roundingRule ?? "확인 필요"}`
+      : `${pk?.근거 ?? "지자체 조례 확인 필요"} / ${pk?.기준 ?? ""}`,
+    confidence: pk?.ordinanceStatus === "confirmed" && !pk?.판단불가 ? "confirmed" : "unverified",
+    scope:"parking",
+    sourceUrl: pk?.sourceUrl,
+    requiresInput: parkingCount === null || pk?.판단불가 ? ["지자체 주차장 조례", "용도별 면적", "세대수 또는 전용면적"] : undefined,
+  });
 
   const 계단2개 = hasTotalArea && hasFloors && (면 >= 1000 || (공동주택 && 층 >= 5));
   const cf층수 = 층수추정 ? "estimated" : "confirmed";
