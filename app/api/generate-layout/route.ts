@@ -312,80 +312,85 @@ function buildFloorSvg(
   }
 
   // 후보 [minX, maxX] × [minY, minY+height] 에서 건폐율 상한까지 최대 면적 직사각형
-  // 가로/세로 치수 캡 없이 폴리곤이 허용하는 전체 폭·높이를 사용
+  // 폭 최대 유지, 건폐율 초과 시 높이만 줄임
   function evalRect(rMinX: number, rMaxX: number, minY: number, height: number): {
     area: number; minX: number; maxX: number; minY: number; maxY: number;
   } {
-    const cW0 = Math.max(0, rMaxX - rMinX);
-    if (cW0 <= 0 || height <= 0) return { area: 0, minX: rMinX, maxX: rMinX, minY, maxY: minY };
-    // 건폐율 면적 상한 초과 시 비율 유지하며 축소
-    let cW = cW0, cH = height;
-    if (cW * cH > targetArea) { const s = Math.sqrt(targetArea / (cW * cH)); cW *= s; cH *= s; }
-    const cx = (rMinX + rMaxX) / 2;
-    return {
-      area: cW * cH,
-      minX: Math.max(cx - cW / 2, rMinX),
-      maxX: Math.min(cx + cW / 2, rMaxX),
-      minY,
-      maxY: minY + cH,
-    };
+    const cW = Math.max(0, rMaxX - rMinX);
+    if (cW <= 0 || height <= 0) return { area: 0, minX: rMinX, maxX: rMinX, minY, maxY: minY };
+    const cH = cW * height > targetArea ? targetArea / cW : height;
+    return { area: cW * cH, minX: rMinX, maxX: rMaxX, minY, maxY: minY + cH };
   }
 
-  // 남쪽 고정·북쪽 스윕: 주차를 남쪽에 배치할 때 건물 최적화
-  function findBestRect(southY: number, northY: number): {
+  // 남쪽·북쪽 모두 자유로운 2D 스윕 — 폴리곤 내부 최대 직사각형 탐색
+  // 기존 함수들(findBestRect/findBestRectFromTop)은 항상 폴리곤 팁(폭=0)을 검사해 0㎡ 반환 →
+  // Y 샘플을 팁 제외 내부로만 한정해 두 끝을 동시에 스윕
+  function findMaxRect(southBound: number, northBound: number): {
     area: number; minX: number; maxX: number; minY: number; maxY: number;
   } {
-    const availH = Math.max(northY - southY, 0);
-    let best = { area: 0, minX: bzMinX, maxX: bzMaxX, minY: southY, maxY: southY };
+    let best = { area: 0, minX: bzMinX, maxX: bzMinX, minY: southBound, maxY: southBound };
 
-    for (let ki = 0; ki <= STEPS; ki++) {
-      const candMaxY = northY - (ki / STEPS) * availH;
-      if (candMaxY <= southY) break;
+    // Y 샘플: 균등 분할 + 폴리곤 꼭짓점 Y (폭 급변 지점), 양 끝 팁 제외
+    const ySet = new Set<number>();
+    for (let i = 1; i < STEPS; i++) {
+      ySet.add(southBound + (i / STEPS) * (northBound - southBound));
+    }
+    for (const [, vy] of insetParcel) {
+      if (vy > southBound + EPS && vy < northBound - EPS) ySet.add(vy);
+    }
+    const yArr = [...ySet].sort((a, b) => a - b);
+    if (yArr.length < 2) return best;
 
-      for (const [topMinX, topMaxX] of polyIntervalsAtY(insetParcel, candMaxY)) {
-        // 꼭짓점 Y 기반 샘플링 (꼭짓점 사이 경계는 선형 → 꼭짓점에서 최솟값 보장)
-        const yLevels: number[] = [southY, candMaxY];
-        for (const [, vy] of insetParcel) if (vy > southY && vy < candMaxY) yLevels.push(vy);
-        yLevels.sort((a, b) => a - b);
+    // 상단 Y 고정 → 하단 Y 하향 스윕
+    for (let ti = yArr.length - 1; ti >= 1; ti--) {
+      const topY = yArr[ti];
+      const topIntvs = polyIntervalsAtY(insetParcel, topY);
+      if (!topIntvs.length) continue;
 
-        const [rMinX, rMaxX] = shrinkX(topMinX + EPS, topMaxX - EPS, yLevels);
-        const cand = evalRect(rMinX, rMaxX, southY, candMaxY - southY);
+      // topY에서 가장 넓은 구간을 초기 X 범위로
+      let rMinX = topIntvs[0][0] + EPS, rMaxX = topIntvs[0][1] - EPS;
+      for (const [iMin, iMax] of topIntvs) {
+        if (iMax - iMin > rMaxX - rMinX) { rMinX = iMin + EPS; rMaxX = iMax - EPS; }
+      }
+      if (rMaxX <= rMinX) continue;
+
+      for (let bi = ti - 1; bi >= 0; bi--) {
+        const botY = yArr[bi];
+        const height = topY - botY;
+        if (height <= EPS) continue;
+
+        // botY에서 폴리곤 구간 → 현재 X 범위와 교집합
+        const botIntvs = polyIntervalsAtY(insetParcel, botY);
+        if (!botIntvs.length) break;
+
+        let bestOvlpW = 0, newMin = rMinX, newMax = rMinX;
+        for (const [iMin, iMax] of botIntvs) {
+          const oMin = Math.max(rMinX, iMin + EPS);
+          const oMax = Math.min(rMaxX, iMax - EPS);
+          if (oMax > oMin && oMax - oMin > bestOvlpW) {
+            bestOvlpW = oMax - oMin; newMin = oMin; newMax = oMax;
+          }
+        }
+        if (bestOvlpW <= 0) break;
+        rMinX = newMin; rMaxX = newMax;
+
+        // botY ~ topY 사이 꼭짓점 Y에서 추가 X 축소
+        const innerYs = insetParcel
+          .filter(([, vy]) => vy > botY + EPS && vy < topY - EPS)
+          .map(([, vy]) => vy);
+        const [fMinX, fMaxX] = shrinkX(rMinX, rMaxX, innerYs);
+        if (fMaxX <= fMinX) continue;
+
+        const cand = evalRect(fMinX, fMaxX, botY, height);
         if (cand.area > best.area) best = cand;
       }
     }
     return best;
   }
 
-  // 북쪽 고정·남쪽 스윕: 주차를 북쪽에 배치할 때 건물 최적화
-  function findBestRectFromTop(northY: number, southBound: number): {
-    area: number; minX: number; maxX: number; minY: number; maxY: number;
-  } {
-    const availH = Math.max(northY - southBound, 0);
-    let best = { area: 0, minX: bzMinX, maxX: bzMaxX, minY: northY, maxY: northY };
-
-    for (let ki = 0; ki <= STEPS; ki++) {
-      const candMinY = northY - (ki / STEPS) * availH; // 남쪽 경계를 아래로 내림
-      if (candMinY < southBound) break;
-
-      for (const [botMinX, botMaxX] of polyIntervalsAtY(insetParcel, candMinY)) {
-        const yLevels: number[] = [candMinY, northY];
-        for (const [, vy] of insetParcel) if (vy > candMinY && vy < northY) yLevels.push(vy);
-        yLevels.sort((a, b) => a - b);
-
-        const [rMinX, rMaxX] = shrinkX(botMinX + EPS, botMaxX - EPS, yLevels);
-        const cand = evalRect(rMinX, rMaxX, candMinY, northY - candMinY);
-        if (cand.area > best.area) best = cand;
-      }
-    }
-    return best;
-  }
-
-  // 건물 배치: 인셋 폴리곤 전체에서 최대 면적 직사각형 탐색
-  // 남쪽 고정·북쪽 스윕 + 북쪽 고정·남쪽 스윕 두 방향 중 큰 쪽 선택
+  // 정북일조 이격 적용 후 인셋 폴리곤 전체에서 최대 직사각형 탐색
   const northLimit = bzMaxY - northSetbackM;
-  const resA = findBestRect(bzMinY, northLimit);
-  const resB = findBestRectFromTop(northLimit, bzMinY);
-  const bestRes = resA.area >= resB.area ? resA : resB;
+  const bestRes = findMaxRect(bzMinY, northLimit);
 
 
   const bMinX = bestRes.minX;
