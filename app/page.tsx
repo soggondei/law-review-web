@@ -8,6 +8,7 @@ import type { PdfExtractResult } from "@/app/api/pdf-extract/route";
 import { Accordion } from "@/components/Accordion";
 import { ItemTable, badgeColor, getLawUrl, type LawItem } from "@/components/ItemTable";
 import { ScheduleTable } from "@/components/ScheduleTable";
+import { FloorActionTable, type FloorSelection } from "@/components/FloorActionTable";
 
 const BuildingViewer3D = dynamic(() => import("@/components/BuildingViewer3D"), {
   ssr: false,
@@ -108,6 +109,8 @@ export default function Home() {
   const [세대수입력, set세대수입력] = useState(0);
   const [대수선옵션, set대수선옵션] = useState({ 체크항목: [] as number[], 해체: false, 전체해체: false, 준공연도: "", 리모델링활성화: false });
   const [용도변경옵션, set용도변경옵션] = useState({ 기존용도: "", 변경유형: "" as "" | "동일군" | "상위군" | "하위군" | "타군" });
+  const [floorSelections, setFloorSelections] = useState<FloorSelection[]>([]);
+  const [buildingLookupLoading, setBuildingLookupLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [apiResult, setApiResult] = useState<any>(null);
   const [error, setError] = useState("");
@@ -142,6 +145,29 @@ export default function Home() {
     if (act && ["신축","대수선","용도변경"].includes(act)) set행위(act as "신축"|"대수선"|"용도변경");
     try { const h = localStorage.getItem("review-history"); if (h) setReviewHistory(JSON.parse(h)); } catch {}
   }, []);
+
+  // ── 건축물 층별개요 조회 (대수선·용도변경 시 FloorActionTable 초기화) ──────────
+  useEffect(() => {
+    if (행위 === "신축" || !address) { setFloorSelections([]); return; }
+    setBuildingLookupLoading(true);
+    fetch(`/api/building-lookup?address=${encodeURIComponent(address)}`)
+      .then(r => r.json())
+      .then((data: { floors?: { 층: string; 층수: number; 용도: string; 면적: number }[] }) => {
+        const floors = data.floors ?? [];
+        setFloorSelections(floors.map(f => ({
+          층: f.층,
+          면적: f.면적,
+          현재용도: f.용도,
+          용도변경: false,
+          변경면적전체: true,
+          변경면적값: 0,
+          대수선: false,
+          대수선항목: [],
+        })));
+      })
+      .catch(() => setFloorSelections([]))
+      .finally(() => setBuildingLookupLoading(false));
+  }, [행위, address]);
 
   // ── 합필 시나리오 ──────────────────────────────────────────────────────────
   type MergePart = { id: number; address: string; 용도지역?: string; 대지면적?: number; status: 'idle'|'loading'|'ok'|'error' };
@@ -295,7 +321,13 @@ export default function Home() {
       if (cached) {
         data = JSON.parse(cached);
       } else {
-        const body: Record<string, unknown> = { address, 용도, 행위, 지하층입력, 세대수입력, 대수선옵션: 행위 === "대수선" ? 대수선옵션 : null };
+        const hasFloorSel = floorSelections.some(f => f.용도변경 || f.대수선);
+        const body: Record<string, unknown> = {
+          address, 용도, 행위, 지하층입력, 세대수입력,
+          대수선옵션: 행위 === "대수선" ? 대수선옵션 : null,
+          용도변경옵션: 행위 === "용도변경" ? 용도변경옵션 : null,
+          층별행위: hasFloorSel ? floorSelections : null,
+        };
         if (합필모드 && 합필총면적 > 0) body.면적 = 합필총면적;
         const res = await fetch("/api/analyze", {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -805,6 +837,11 @@ export default function Home() {
               {/* 대수선 탭 */}
               {행위 === "대수선" && (
                 <div className="p-3 space-y-3 bg-amber-50/40">
+                  {buildingLookupLoading ? (
+                    <p className="text-[11px] text-gray-400 text-center py-2 animate-pulse">층별개요 조회 중...</p>
+                  ) : (
+                    <FloorActionTable selections={floorSelections} onChange={setFloorSelections} />
+                  )}
                   <div>
                     <div className="text-[11px] text-gray-500 mb-1.5">해당 항목 선택 (건축법 시행령 제3조의2)</div>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1">
@@ -855,6 +892,11 @@ export default function Home() {
               {/* 용도변경 탭 */}
               {행위 === "용도변경" && (
                 <div className="p-3 space-y-3 bg-blue-50/40">
+                  {buildingLookupLoading ? (
+                    <p className="text-[11px] text-gray-400 text-center py-2 animate-pulse">층별개요 조회 중...</p>
+                  ) : (
+                    <FloorActionTable selections={floorSelections} onChange={setFloorSelections} 변경후용도={용도 || ""} />
+                  )}
                   <div className="relative">
                     <label className="text-[11px] text-gray-500 mb-1 block">기존 건물 용도</label>
                     <input value={용도변경옵션.기존용도}
