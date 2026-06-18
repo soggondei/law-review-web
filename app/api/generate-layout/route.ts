@@ -365,20 +365,45 @@ function buildFloorSvg(
       return (ox * oy) / apArea < 0.75;
     });
 
-  // 북측 인접 필지: 남단 bbox가 우리 필지 북단(parcelBox.maxY)에서 ±4m 이내이면서
-  // X축 겹침이 있는 필지만 선택 (지적 오차 허용). 너무 멀리 있는 필지 제외.
-  const adjTol = Math.max(2, (parcelBox.maxY - parcelBox.minY) * 0.08); // 최소 2m, 폭의 8%
-  const northAdj = adjParcels.filter(ap => {
+  // ── 주변 필지 전체 수집 (표시 + 정북일조 기준 탐지용) ──────────────────────
+  // 북쪽 30m, 동서남 15m 이내 X축 겹침 필지 (도로 건너편 포함)
+  const adjTol = Math.max(2, (parcelBox.maxY - parcelBox.minY) * 0.08);
+  const allNearby = adjParcels.filter(ap => {
     const ab = bboxOf(ap.polygon);
-    const xOverlap = Math.min(ab.maxX, parcelBox.maxX) - Math.max(ab.minX, parcelBox.minX);
-    // 필지 남단이 우리 필지 북단에 근접 (±adjTol)
-    const southEdgeTouchesNorth = Math.abs(ab.minY - parcelBox.maxY) <= adjTol;
-    return xOverlap > 0.5 && southEdgeTouchesNorth;
+    const xOv = Math.min(ab.maxX, parcelBox.maxX + 15) - Math.max(ab.minX, parcelBox.minX - 15);
+    return xOv > 0 && ab.minY < parcelBox.maxY + 30 && ab.maxY > parcelBox.minY - 15;
   });
-  // 북측 도로 필지 (지목='도')
+
+  // northAdj: 표시용 — 우리 필지 북쪽 30m 이내 X 겹침 필지
+  const northAdj = allNearby.filter(ap => {
+    const ab = bboxOf(ap.polygon);
+    const xOv = Math.min(ab.maxX, parcelBox.maxX) - Math.max(ab.minX, parcelBox.minX);
+    return xOv > 0.5 && ab.minY > parcelBox.maxY - adjTol && ab.minY < parcelBox.maxY + 30;
+  }).sort((a, b) => bboxOf(a.polygon).minY - bboxOf(b.polygon).minY);
+
+  // 도로 필지 탐지 (jimok='도', 위치 무관)
   const northRoad = northAdj.find(ap => ap.jimok === '도');
-  // 정북 이격 기준선: 도로가 있으면 도로 반대편(북단) 경계, 없으면 우리 필지 북단
-  const northRef = northRoad ? bboxOf(northRoad.polygon).maxY : parcelBox.maxY;
+
+  // ── northRef 결정: 실제 인접대지경계선 ──────────────────────────────────────
+  // 전략: 직접 접촉 필지의 maxY를 도로 북단으로 간주 (도로 jimok 무관)
+  // 근거: 건축선(우리 대지 북단) 너머 도로 → 도로 반대편이 인접대지경계선
+  let northRef: number;
+  {
+    const directCands = northAdj.filter(ap => bboxOf(ap.polygon).minY <= parcelBox.maxY + adjTol);
+    if (northRoad) {
+      // 도로 필지 직접 탐지
+      northRef = bboxOf(northRoad.polygon).maxY;
+    } else if (directCands.length > 0) {
+      const directMaxY = Math.max(...directCands.map(ap => bboxOf(ap.polygon).maxY));
+      const beyondDirect = northAdj.filter(ap => bboxOf(ap.polygon).minY > directMaxY + 0.5);
+      // 직접 접촉 필지 너머에 추가 필지 있음 → 직접 접촉 필지가 도로(미분류 포함)
+      northRef = beyondDirect.length > 0 ? directMaxY : parcelBox.maxY;
+    } else {
+      // 직접 접촉 없음 → 가장 가까운 북측 필지 남단 = 인접대지경계선
+      northRef = northAdj.length > 0 ? bboxOf(northAdj[0].polygon).minY : parcelBox.maxY;
+    }
+  }
+  const roadOffset = northRef - parcelBox.maxY; // 도로 폭 (0이면 도로 없음)
 
   // ── 우리 필지의 북향 엣지 탐지 (인접대지경계선 형상) ───────────────────────
   // CCW 폴리곤: outward normal Y = (A.x − B.x)/len > 0 이면 북향
@@ -507,8 +532,8 @@ function buildFloorSvg(
   }
 
   // 정북일조 이격 적용
-  // 제한선 폴리선: 도로 있으면 northRef 기준 수평, 없으면 북향 엣지 형태를 따름
-  const restrictionSegs: [[number,number],[number,number]][] = northRoad
+  // 도로가 있으면 northRef(인접대지경계선) 기준 수평선, 없으면 북향 엣지 형태 따름
+  const restrictionSegs: [[number,number],[number,number]][] = roadOffset > 1.0
     ? [[[parcelBox.minX, northRef - northSetbackM],[parcelBox.maxX, northRef - northSetbackM]]]
     : northFacingEdges.map(([A, B]) => [
         [A[0], A[1] - northSetbackM],
@@ -536,7 +561,8 @@ function buildFloorSvg(
   const PAD       = 3;
   const parcelNS  = parcelBox.maxY - parcelBox.minY;
   // 북쪽으로 보여줄 범위: 정북이격 + 여유 1m (최소 3m, 최대 5m)
-  const northShow = Math.max(3, Math.min(northSetbackM + 1, 5));
+  // 북쪽 표시 범위: 도로 폭 포함, 인접대지경계선이 보이도록
+  const northShow = Math.max(3, Math.min(Math.max(northSetbackM, roadOffset) + 2, 12));
   // 스케일: 우리 필지 + 북쪽 노출 범위를 기준으로 계산
   const dataW = parcelBox.maxX - parcelBox.minX + PAD * 2;
   const dataH = parcelNS + northShow + PAD * 2;
@@ -563,21 +589,30 @@ function buildFloorSvg(
   // 헤더
   els += `<text x="185" y="16" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#1e3a5f">${input.용도} · 대지 ${input.대지면적.toFixed(0)}㎡</text>`;
 
-  // ① 북측 인접 필지 배경 — northShow 범위까지만 클리핑해서 표시
-  const adjClipY = parcelBox.maxY + northShow; // 인접대지 표시 상한 (우리 필지 북단+5m)
-  for (const ap of northAdj) {
+  // ① 주변 모든 필지 지적선 표시 (배경 레이어)
+  for (const ap of allNearby) {
     const isRoad = ap.jimok === '도';
-    const fill   = isRoad ? '#d1d5db' : '#f1f5f9';
-    const stroke = isRoad ? '#9ca3af' : '#9ca3af';
-    const clipped = clipPolygonSouthOf(ap.polygon, adjClipY);
-    if (clipped.length < 3) continue;
-    els += `<polygon points="${ptStr(clipped)}" fill="${fill}" fill-opacity="0.75" stroke="${stroke}" stroke-width="0.8" stroke-dasharray="3,2"/>`;
-    // 지목 라벨 — 클리핑된 폴리곤 상단 근처에 배치
-    const ab = bboxOf(clipped);
-    const labelY = Math.min(ab.maxY, parcelBox.maxY + northShow * 0.5);
+    const fill   = isRoad ? '#e5e7eb' : '#f1f5f9';
+    els += `<polygon points="${ptStr(ap.polygon)}" fill="${fill}" fill-opacity="0.6" stroke="#cbd5e1" stroke-width="0.7"/>`;
+  }
+  // 북측 필지 지목 라벨
+  for (const ap of northAdj) {
+    const ab = bboxOf(ap.polygon);
+    if (ab.minY > parcelBox.maxY + northShow) continue;
+    const isRoad = ap.jimok === '도';
+    const labelY = Math.min((ab.minY + ab.maxY) / 2, parcelBox.maxY + northShow * 0.7);
     const [lax, lay] = toSvg((ab.minX + ab.maxX) / 2, labelY);
-    const label = isRoad ? '도로' : (ap.jimok ? ap.jimok : '인접대지');
-    els += `<text x="${lax.toFixed(0)}" y="${(lay + 4).toFixed(0)}" text-anchor="middle" font-size="7" fill="${isRoad ? '#92400e' : '#64748b'}">${label}</text>`;
+    els += `<text x="${lax.toFixed(0)}" y="${(lay + 4).toFixed(0)}" text-anchor="middle" font-size="7" fill="${isRoad ? '#92400e' : '#64748b'}">${isRoad ? '도로' : (ap.jimok || '인접대지')}</text>`;
+  }
+
+  // 인접대지경계선 강조 (정북일조 산정 기준선)
+  if (!is공동주택) {
+    const [nrX1, nrY] = toSvg(parcelBox.minX - 3, northRef);
+    const [nrX2,    ] = toSvg(parcelBox.maxX + 3, northRef);
+    els += `<line x1="${nrX1.toFixed(1)}" y1="${nrY.toFixed(1)}" x2="${nrX2.toFixed(1)}" y2="${nrY.toFixed(1)}" stroke="#b45309" stroke-width="2.2"/>`;
+    const [nrLblX, nrLblY] = toSvg((parcelBox.minX + parcelBox.maxX) / 2, northRef);
+    els += `<rect x="${(nrLblX - 54).toFixed(0)}" y="${(nrLblY - 11).toFixed(0)}" width="108" height="9" fill="white" fill-opacity="0.85" rx="1"/>`;
+    els += `<text x="${nrLblX.toFixed(0)}" y="${(nrLblY - 4).toFixed(0)}" text-anchor="middle" font-size="6.5" fill="#b45309">인접대지경계선 (기준)</text>`;
   }
 
   // ② 필지 경계 (이점쇄선) — 가장 굵게 (위계 1)
@@ -678,8 +713,8 @@ function buildFloorSvg(
       { fill: '#fefce8', stroke: '#6b7280', dash: '4,2', label: '대지경계선' },
       { fill: '#eff6ff', stroke: '#93c5fd', dash: '3,2', label: '건축가능영역' },
       ...(!is공동주택 ? [{ fill: '#fef3c7', stroke: '#d97706', dash: '', label: '정북이격대' }] : []),
-      ...(northAdj.some(a => a.jimok !== '도') ? [{ fill: '#f3f4f6', stroke: '#9ca3af', dash: '', label: '인접대지' }] : []),
-      ...(northRoad ? [{ fill: '#d1d5db', stroke: '#9ca3af', dash: '', label: '북측도로' }] : []),
+      ...(allNearby.some(a => a.jimok !== '도') ? [{ fill: '#f1f5f9', stroke: '#cbd5e1', dash: '', label: '주변대지' }] : []),
+      ...(allNearby.some(a => a.jimok === '도') ? [{ fill: '#e5e7eb', stroke: '#cbd5e1', dash: '', label: '도로' }] : []),
     ];
     const itemWidths = legendItems.map(it => 10 + it.label.length * 5.5 + 8);
     const totalW = itemWidths.reduce((s, w) => s + w, 0);
