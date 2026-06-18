@@ -30,6 +30,8 @@ const LandUseMap = dynamic(() => import("@/components/LandUseMap"), {
 
 const PdfExtractPanel = dynamic(() => import("@/components/PdfExtractPanel"), { ssr: false });
 
+const MassStudyViewer = dynamic(() => import("@/components/MassStudyViewer"), { ssr: false });
+
 const MassPreview3D = dynamic(() => import("@/components/MassPreview3D"), {
   ssr: false,
   loading: () => (
@@ -135,6 +137,11 @@ export default function Home() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [reviewHistory, setReviewHistory] = useState<{ address: string; 용도목록: string[]; 행위: string; ts: number }[]>([]);
   const [shareToast, setShareToast] = useState(false);
+  const [massStudyData, setMassStudyData] = useState<{
+    floors: { floor: number; area: number; svg: string }[];
+    stats: { 건축면적: number; 연면적: number; 층수: number; 층고: number; 총높이: number };
+  } | null>(null);
+  const [massStudyLoading, setMassStudyLoading] = useState(false);
 
   // ── 초기화: URL 파라미터 복원 + 히스토리 로드 ──────────────────────────────
   useEffect(() => {
@@ -168,6 +175,38 @@ export default function Home() {
       .catch(() => setFloorSelections([]))
       .finally(() => setBuildingLookupLoading(false));
   }, [행위, address]);
+
+  // ── 매스 스터디: 분석 결과·층수·대지면적 변경 시 자동 재계산 ────────────────────
+  useEffect(() => {
+    const rule = apiResult?.baseData?.effectiveRule;
+    const 층수 = editParams.층수;
+    const 대지면적 = editParams.대지면적;
+    if (!apiResult || !rule || !층수 || !대지면적) { setMassStudyData(null); return; }
+    const body = {
+      대지면적,
+      건폐율: rule.건폐율,
+      용적률: rule.용적률,
+      층수,
+      용도: apiResult.용도 || "단독주택",
+      최대연면적: Math.round(rule.용적률 * 대지면적 / 100),
+      ...(apiResult.coords?.lat ? { lat: apiResult.coords.lat, lng: apiResult.coords.lng } : {}),
+    };
+    const ctrl = new AbortController();
+    setMassStudyLoading(true);
+    setMassStudyData(null);
+    fetch("/api/generate-layout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    })
+      .then(res => res.json())
+      .then(data => { if (!data.error && data.floors) setMassStudyData(data); })
+      .catch(() => {})
+      .finally(() => setMassStudyLoading(false));
+    return () => ctrl.abort();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiResult, editParams.층수, editParams.대지면적]);
 
   // ── 합필 시나리오 ──────────────────────────────────────────────────────────
   type MergePart = { id: number; address: string; 용도지역?: string; 대지면적?: number; status: 'idle'|'loading'|'ok'|'error' };
@@ -1261,6 +1300,29 @@ export default function Home() {
                     OSM 건물(높이 포함) · Vworld 필지 · 도로/보도 — 🏗 DAE 버튼으로 SketchUp에서 열 수 있는 파일 다운로드
                   </p>
                 </div>
+              </Accordion>
+            </div>
+          )}
+
+          {/* 매스 스터디 평면 뷰어 */}
+          {(massStudyData || massStudyLoading) && (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <Accordion
+                title="매스 스터디"
+                badge={massStudyData
+                  ? `${massStudyData.stats.층수}층 · 건축면적 ${massStudyData.stats.건축면적}㎡ · 연면적 ${massStudyData.stats.연면적}㎡`
+                  : "계산 중…"}
+              >
+                {massStudyLoading ? (
+                  <div className="flex items-center justify-center h-40">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-6 h-6 border-3 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+                      <span className="text-[11px] text-gray-400">법정 볼륨 계산 중…</span>
+                    </div>
+                  </div>
+                ) : massStudyData ? (
+                  <MassStudyViewer floors={massStudyData.floors} stats={massStudyData.stats} />
+                ) : null}
               </Accordion>
             </div>
           )}
