@@ -407,6 +407,24 @@ function buildFloorSvg(
   }
   const roadOffset = northRef - parcelBox.maxY; // 도로 폭 (0이면 도로 없음)
 
+  // ── 인접대지경계선 세그먼트: 도로 북단 실제 경계선 형상 ───────────────────────
+  // northRoad 폴리곤의 북향 엣지를 추출해 실제 경계선 형상을 그대로 사용
+  const northBoundarySegs: [[number,number],[number,number]][] = [];
+  if (northRoad && roadOffset > 0.5) {
+    const poly = northRoad.polygon;
+    const ccwRoad = signedArea2D(poly) > 0 ? poly : [...poly].reverse();
+    for (let i = 0; i < ccwRoad.length; i++) {
+      const A = ccwRoad[i], B = ccwRoad[(i + 1) % ccwRoad.length];
+      const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      if (len < 0.1) continue;
+      if ((A[0] - B[0]) / len > 0.15) northBoundarySegs.push([A as [number,number], B as [number,number]]);
+    }
+  }
+  // fallback: northRef Y 기준 수평선
+  if (northBoundarySegs.length === 0) {
+    northBoundarySegs.push([[parcelBox.minX, northRef], [parcelBox.maxX, northRef]]);
+  }
+
   // ── 우리 필지의 북향 엣지 탐지 (인접대지경계선 형상) ───────────────────────
   // CCW 폴리곤: outward normal Y = (A.x − B.x)/len > 0 이면 북향
   const ccwParcel = signedArea2D(parcel) > 0 ? parcel : [...parcel].reverse();
@@ -533,14 +551,13 @@ function buildFloorSvg(
     return best;
   }
 
-  // 정북일조 이격 적용
-  // 도로가 있으면 northRef(인접대지경계선) 기준 수평선, 없으면 북향 엣지 형태 따름
-  const restrictionSegs: [[number,number],[number,number]][] = roadOffset > 1.0
-    ? [[[parcelBox.minX, northRef - northSetbackM],[parcelBox.maxX, northRef - northSetbackM]]]
-    : northFacingEdges.map(([A, B]) => [
-        [A[0], A[1] - northSetbackM],
-        [B[0], B[1] - northSetbackM],
-      ] as [[number,number],[number,number]]);
+  // 정북일조 제한선: 인접대지경계선 세그먼트를 setbackM만큼 남쪽으로 평행이동
+  // 도로가 있으면 northBoundarySegs(실제 도로 북단 형상), 없으면 우리 필지 북향 엣지 사용
+  const baseSegs = roadOffset > 0.5 ? northBoundarySegs : northFacingEdges;
+  const restrictionSegs: [[number,number],[number,number]][] = baseSegs.map(([A, B]) => [
+    [A[0], A[1] - northSetbackM],
+    [B[0], B[1] - northSetbackM],
+  ] as [[number,number],[number,number]]);
 
   // 건물 북단 한계: 제한선의 최소 Y (가장 제약적인 지점 기준, 보수적)
   const bldgNorthLimit = restrictionSegs.length > 0
@@ -607,14 +624,20 @@ function buildFloorSvg(
     els += `<text x="${lax.toFixed(0)}" y="${(lay + 4).toFixed(0)}" text-anchor="middle" font-size="7" fill="${isRoad ? '#92400e' : '#64748b'}">${isRoad ? '도로' : (ap.jimok || '인접대지')}</text>`;
   }
 
-  // 인접대지경계선 강조 (정북일조 산정 기준선)
+  // 인접대지경계선 강조 — northBoundarySegs 실제 형상 그대로 표시
   if (!is공동주택) {
-    const [nrX1, nrY] = toSvg(parcelBox.minX - 3, northRef);
-    const [nrX2,    ] = toSvg(parcelBox.maxX + 3, northRef);
-    els += `<line x1="${nrX1.toFixed(1)}" y1="${nrY.toFixed(1)}" x2="${nrX2.toFixed(1)}" y2="${nrY.toFixed(1)}" stroke="#b45309" stroke-width="2.2"/>`;
-    const [nrLblX, nrLblY] = toSvg((parcelBox.minX + parcelBox.maxX) / 2, northRef);
-    els += `<rect x="${(nrLblX - 54).toFixed(0)}" y="${(nrLblY - 11).toFixed(0)}" width="108" height="9" fill="white" fill-opacity="0.85" rx="1"/>`;
-    els += `<text x="${nrLblX.toFixed(0)}" y="${(nrLblY - 4).toFixed(0)}" text-anchor="middle" font-size="6.5" fill="#b45309">인접대지경계선 (기준)</text>`;
+    for (const [nbA, nbB] of northBoundarySegs) {
+      const [ax, ay] = toSvg(nbA[0], nbA[1]);
+      const [bx, by] = toSvg(nbB[0], nbB[1]);
+      els += `<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#b45309" stroke-width="2.2"/>`;
+    }
+    // 라벨: 세그먼트 중점 기준
+    const allNbPts = northBoundarySegs.flatMap(([A, B]) => [A, B]);
+    const nrLblX = allNbPts.reduce((s, p) => s + p[0], 0) / allNbPts.length;
+    const nrLblY = allNbPts.reduce((s, p) => s + p[1], 0) / allNbPts.length;
+    const [nrSvgX, nrSvgY] = toSvg(nrLblX, nrLblY);
+    els += `<rect x="${(nrSvgX - 54).toFixed(0)}" y="${(nrSvgY - 11).toFixed(0)}" width="108" height="9" fill="white" fill-opacity="0.85" rx="1"/>`;
+    els += `<text x="${nrSvgX.toFixed(0)}" y="${(nrSvgY - 4).toFixed(0)}" text-anchor="middle" font-size="6.5" fill="#b45309">인접대지경계선 (기준)</text>`;
   }
 
   // ② 필지 경계 (이점쇄선) — 가장 굵게 (위계 1)
