@@ -295,6 +295,24 @@ function clipPolygonNorthOf(poly: [number,number][], yMin: number): [number,numb
   return out;
 }
 
+// ── 남측 클리핑: parcel을 Y≤yMax 영역으로 자름 (인접 필지 표시 제한용) ───────
+function clipPolygonSouthOf(poly: [number,number][], yMax: number): [number,number][] {
+  if (poly.length < 3) return [];
+  const out: [number,number][] = [];
+  for (let i = 0; i < poly.length; i++) {
+    const curr = poly[i];
+    const next = poly[(i + 1) % poly.length];
+    const cIn  = curr[1] <= yMax;
+    const nIn  = next[1] <= yMax;
+    if (cIn) out.push(curr);
+    if (cIn !== nIn) {
+      const t = (yMax - curr[1]) / (next[1] - curr[1]);
+      out.push([curr[0] + t * (next[0] - curr[0]), yMax]);
+    }
+  }
+  return out;
+}
+
 // ── 층별 평면도 SVG — 법적 이격 기반 건축가능영역 ─────────────────────────────
 function buildFloorSvg(
   floorIdx: number,
@@ -349,8 +367,7 @@ function buildFloorSvg(
 
   // 북측 인접 필지: 남단 bbox가 우리 필지 북단(parcelBox.maxY)에서 ±4m 이내이면서
   // X축 겹침이 있는 필지만 선택 (지적 오차 허용). 너무 멀리 있는 필지 제외.
-  const parcelNS = parcelBox.maxY - parcelBox.minY; // 우리 필지 남북 폭
-  const adjTol = Math.max(2, parcelNS * 0.08);       // 최소 2m, 필지 폭의 8% 허용
+  const adjTol = Math.max(2, (parcelBox.maxY - parcelBox.minY) * 0.08); // 최소 2m, 폭의 8%
   const northAdj = adjParcels.filter(ap => {
     const ab = bboxOf(ap.polygon);
     const xOverlap = Math.min(ab.maxX, parcelBox.maxX) - Math.max(ab.minX, parcelBox.minX);
@@ -492,20 +509,20 @@ function buildFloorSvg(
   const area  = parseFloat((fW * fH).toFixed(2));
 
   // ── SVG 좌표 변환 ─────────────────────────────────────────────────────
-  // 필지가 (0,0) 중심. 드로잉 영역은 좌측 400px, 우측 130px = 이격거리 표
-  // northAdj 폴리곤도 화면 안에 들어오도록 북쪽 extent 계산 (최대 20m)
-  const PAD = 3;
-  const northExtent = northAdj.length > 0
-    ? Math.min(parcelBox.maxY + 20, Math.max(...northAdj.map(ap => bboxOf(ap.polygon).maxY)))
-    : parcelBox.maxY;
+  // 우리 필지가 화면 주인공. 북측 인접대지는 최대 5m 폭 노출만.
+  const PAD       = 3;
+  const parcelNS  = parcelBox.maxY - parcelBox.minY;
+  // 북쪽으로 보여줄 범위: 정북이격 + 여유 1m (최소 3m, 최대 5m)
+  const northShow = Math.max(3, Math.min(northSetbackM + 1, 5));
+  // 스케일: 우리 필지 + 북쪽 노출 범위를 기준으로 계산
   const dataW = parcelBox.maxX - parcelBox.minX + PAD * 2;
-  const dataH = northExtent - parcelBox.minY + PAD * 2;
-  const sc    = Math.min(240 / dataW, 230 / dataH);
-  const SVG_CX = 200; // 드로잉 영역(0-400) 중앙
-  // 데이터 중심을 드로잉 영역 중앙에 맞춤
-  const drawingMidY = 44 + (H - 44 - 30) / 2;
-  const dataCenterY = (northExtent + parcelBox.minY) / 2;
-  const SVG_CY = drawingMidY + dataCenterY * sc;
+  const dataH = parcelNS + northShow + PAD * 2;
+  const sc    = Math.min(240 / dataW, 260 / dataH);
+  const SVG_CX = 200;
+  // 우리 필지 북단이 drawingTop + northShow*sc 위치에 오도록 SVG_CY 결정
+  // toSvg(0, parcelBox.maxY)[1] = SVG_CY - parcelBox.maxY * sc = drawingTop + northShow*sc
+  const drawingTop = 44;
+  const SVG_CY = drawingTop + (northShow + parcelBox.maxY) * sc;
 
   const toSvg = (x: number, y: number): [number, number] =>
     [SVG_CX + x * sc, SVG_CY - y * sc];
@@ -524,16 +541,21 @@ function buildFloorSvg(
   // 헤더
   els += `<text x="200" y="16" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#1e3a5f">${input.용도} · 대지 ${input.대지면적.toFixed(0)}㎡</text>`;
 
-  // ① 북측 인접 필지 배경 (우리 필지보다 먼저 그려 아래에 깔림)
+  // ① 북측 인접 필지 배경 — northShow 범위까지만 클리핑해서 표시
+  const adjClipY = parcelBox.maxY + northShow; // 인접대지 표시 상한 (우리 필지 북단+5m)
   for (const ap of northAdj) {
     const isRoad = ap.jimok === '도';
-    const fill   = isRoad ? '#fef9c3' : '#f3f4f6';
+    const fill   = isRoad ? '#fef9c3' : '#f1f5f9';
     const stroke = isRoad ? '#ca8a04' : '#9ca3af';
-    els += `<polygon points="${ptStr(ap.polygon)}" fill="${fill}" fill-opacity="0.7" stroke="${stroke}" stroke-width="1" stroke-dasharray="4,2"/>`;
-    // 지목 라벨
-    const ab = bboxOf(ap.polygon);
-    const [lax, lay] = toSvg((ab.minX + ab.maxX) / 2, (ab.minY + ab.maxY) / 2);
-    els += `<text x="${lax.toFixed(0)}" y="${lay.toFixed(0)}" text-anchor="middle" font-size="7" fill="${isRoad ? '#92400e' : '#6b7280'}">${isRoad ? '도로' : ap.jimok || '인접대지'}</text>`;
+    const clipped = clipPolygonSouthOf(ap.polygon, adjClipY);
+    if (clipped.length < 3) continue;
+    els += `<polygon points="${ptStr(clipped)}" fill="${fill}" fill-opacity="0.75" stroke="${stroke}" stroke-width="0.8" stroke-dasharray="3,2"/>`;
+    // 지목 라벨 — 클리핑된 폴리곤 상단 근처에 배치
+    const ab = bboxOf(clipped);
+    const labelY = Math.min(ab.maxY, parcelBox.maxY + northShow * 0.5);
+    const [lax, lay] = toSvg((ab.minX + ab.maxX) / 2, labelY);
+    const label = isRoad ? '도로' : (ap.jimok ? ap.jimok : '인접대지');
+    els += `<text x="${lax.toFixed(0)}" y="${(lay + 4).toFixed(0)}" text-anchor="middle" font-size="7" fill="${isRoad ? '#92400e' : '#64748b'}">${label}</text>`;
   }
 
   // ② 필지 경계 (이점쇄선)
