@@ -327,9 +327,6 @@ function buildFloorSvg(
   const floorBottomH = floorIdx * 층고;
   const floorTopH    = (floorIdx + 1) * 층고;
   const northSetbackM = calcNorthSetback(floorTopH, input.용도);
-  // 건물 풋프린트는 최종층 높이 기준 최대 이격으로 고정 → 모든 층 동일 풋프린트
-  const maxFloorTopH      = input.층수 * 층고;
-  const maxNorthSetbackM  = calcNorthSetback(maxFloorTopH, input.용도);
 
   // ── 법적 이격 상수 ─────────────────────────────────────────────────────
   const BASE_SB   = 0.5;    // 대지안의 공지 (인접 대지경계선, 기본 0.5m)
@@ -498,13 +495,11 @@ function buildFloorSvg(
   }
 
   // 정북일조 이격 적용
-  // northRef = 우리 필지 북단(도로 없음) 또는 북측 도로 반대편 경계선
-  // 건물 풋프린트: 최대 이격(최종층 기준) → 모든 층 동일한 북측 한계
-  const fixedBldgNorthLimit = northRef - maxNorthSetbackM;
-  const northLimit = Math.max(bzMinY + EPS, Math.min(fixedBldgNorthLimit, bzMaxY - EPS));
-  const bestRes = findMaxRect(bzMinY, northLimit);
-  // 이 층의 제한선: 시각화 표시 전용 (제한선·이격대 렌더링에만 사용)
+  // northRef = 인접대지경계선 (도로 없음 → 우리 필지 북단, 도로 있음 → 도로 북단)
+  // 각 층은 자기 높이 기준으로 northLimitY를 계산 → 층별 다른 풋프린트 (계단식 매스)
   const bldgNorthLimit = northRef - northSetbackM;
+  const northLimit = Math.max(bzMinY + EPS, Math.min(bldgNorthLimit, bzMaxY - EPS));
+  const bestRes = findMaxRect(bzMinY, northLimit);
 
   const bMinX = bestRes.minX;
   const bMaxX = bestRes.maxX;
@@ -519,7 +514,7 @@ function buildFloorSvg(
   const PAD       = 3;
   const parcelNS  = parcelBox.maxY - parcelBox.minY;
   // 북쪽으로 보여줄 범위: 정북이격 + 여유 1m (최소 3m, 최대 5m)
-  const northShow = Math.max(3, Math.min(maxNorthSetbackM + 1, 5));
+  const northShow = Math.max(3, Math.min(northSetbackM + 1, 5));
   // 스케일: 우리 필지 + 북쪽 노출 범위를 기준으로 계산
   const dataW = parcelBox.maxX - parcelBox.minX + PAD * 2;
   const dataH = parcelNS + northShow + PAD * 2;
@@ -595,54 +590,31 @@ function buildFloorSvg(
 
   // ⑦ 정북일조제한선 + 북측 기준경계선 + 치수선
   if (!is공동주택) {
-    // 기준경계선 좌표 (치수선 계산용, 시각 표시 없음)
-    const [rx1, ry1] = toSvg(parcelBox.minX, northRef);
 
-    // 정북일조제한선: 대지 경계선을 northSetbackM만큼 수직으로 이격한 형상
-    // → insetPolygon의 북향(north-facing) 엣지를 사용해 경계선 형태를 따름
-    if (northSetbackM > 0 && bldgNorthLimit < parcelBox.maxY) {
-      const northRestrictPoly = insetPolygon(parcel, northSetbackM);
-      // CCW 폴리곤에서 북향 엣지: 외향 법선 Y > 0 ↔ A.x > B.x
-      // 수직면(동서측면) 제외: outNY = (A.x-B.x)/len > 0.5 (45° 이상 북향)
-      const nrEdges: [[number,number],[number,number]][] = [];
-      for (let i = 0; i < northRestrictPoly.length; i++) {
-        const A = northRestrictPoly[i];
-        const B = northRestrictPoly[(i + 1) % northRestrictPoly.length];
-        const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
-        if (len < 1e-6) continue;
-        const outNY = (A[0] - B[0]) / len;
-        if (outNY > 0.5) nrEdges.push([A, B]);
-      }
+    // 정북일조제한선 — 인접대지경계선(northRef)에서 수직 이격한 수평선
+    if (northSetbackM > 0 && bldgNorthLimit < northRef) {
+      const [lx1, ly] = toSvg(parcelBox.minX, bldgNorthLimit);
+      const [lx2,   ] = toSvg(parcelBox.maxX, bldgNorthLimit);
+      const [, refY]  = toSvg(0, northRef);
 
-      // 제한선 그리기
-      let edgeSvgMidX = 0, edgeSvgMidY = 0;
-      for (const [A, B] of nrEdges) {
-        const [ax, ay] = toSvg(A[0], A[1]);
-        const [bx, by] = toSvg(B[0], B[1]);
-        els += `<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#d97706" stroke-width="2"/>`;
-        edgeSvgMidX += (ax + bx) / 2;
-        edgeSvgMidY += (ay + by) / 2;
-      }
+      // 제한선 수평선
+      els += `<line x1="${lx1.toFixed(1)}" y1="${ly.toFixed(1)}" x2="${lx2.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#d97706" stroke-width="2" stroke-dasharray="6,3"/>`;
 
-      if (nrEdges.length > 0) {
-        edgeSvgMidX /= nrEdges.length;
-        edgeSvgMidY /= nrEdges.length;
-        const lmx = edgeSvgMidX.toFixed(0);
-        const lmy = (edgeSvgMidY - 5).toFixed(0);
-        const lbl = `정북일조제한선 (h=${floorTopH.toFixed(1)}m, ${northSetbackM.toFixed(2)}m)`;
-        els += `<rect x="${(edgeSvgMidX - 70).toFixed(0)}" y="${(edgeSvgMidY - 14).toFixed(0)}" width="140" height="10" fill="white" fill-opacity="0.85" rx="1"/>`;
-        els += `<text x="${lmx}" y="${lmy}" text-anchor="middle" font-size="6.5" fill="#b45309">${lbl}</text>`;
-      }
+      // 라벨: 이격대 중간(northRef~bldgNorthLimit 중점)에 배치 → 건물 내부 비침 없음
+      const [, midLabelY] = toSvg(0, (northRef + bldgNorthLimit) / 2);
+      const midSvgX = ((lx1 + lx2) / 2).toFixed(0);
+      const lbl = `정북일조제한선 (h=${floorTopH.toFixed(1)}m → ${northSetbackM.toFixed(2)}m 이격)`;
+      els += `<rect x="${(Number(midSvgX) - 80).toFixed(0)}" y="${(midLabelY - 8).toFixed(0)}" width="160" height="10" fill="white" fill-opacity="0.85" rx="1"/>`;
+      els += `<text x="${midSvgX}" y="${midLabelY.toFixed(0)}" text-anchor="middle" font-size="6.5" fill="#b45309">${lbl}</text>`;
 
-      // 치수선 (왼쪽, 기준선↔제한선 수직 거리)
-      const [, ly1] = toSvg(0, bldgNorthLimit);
-      const dimX = Math.max(10, rx1 - 14);
-      els += `<line x1="${dimX}" y1="${ry1.toFixed(1)}" x2="${dimX}" y2="${ly1.toFixed(1)}" stroke="#d97706" stroke-width="0.8" stroke-dasharray="2,2"/>`;
-      els += `<line x1="${(dimX-3).toFixed(0)}" y1="${ry1.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${ry1.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
-      els += `<line x1="${(dimX-3).toFixed(0)}" y1="${ly1.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${ly1.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
-      const midDimY = ((ry1 + ly1) / 2).toFixed(0);
-      els += `<rect x="${(dimX - 20).toFixed(0)}" y="${(Number(midDimY) - 8).toFixed(0)}" width="19" height="10" fill="white" fill-opacity="0.9" rx="1"/>`;
-      els += `<text x="${(dimX - 10).toFixed(0)}" y="${midDimY}" text-anchor="middle" font-size="7" fill="#b45309">${northSetbackM.toFixed(2)}m</text>`;
+      // 치수선 (왼쪽: northRef ↔ 제한선)
+      const dimX = Math.max(8, lx1 - 16);
+      els += `<line x1="${dimX}" y1="${refY.toFixed(1)}" x2="${dimX}" y2="${ly.toFixed(1)}" stroke="#d97706" stroke-width="0.8" stroke-dasharray="2,2"/>`;
+      els += `<line x1="${(dimX-3).toFixed(0)}" y1="${refY.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${refY.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
+      els += `<line x1="${(dimX-3).toFixed(0)}" y1="${ly.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${ly.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
+      const midDimY = ((refY + ly) / 2).toFixed(0);
+      els += `<rect x="${(dimX - 21).toFixed(0)}" y="${(Number(midDimY) - 8).toFixed(0)}" width="20" height="10" fill="white" fill-opacity="0.9" rx="1"/>`;
+      els += `<text x="${(dimX - 11).toFixed(0)}" y="${midDimY}" text-anchor="middle" font-size="7" fill="#b45309">${northSetbackM.toFixed(2)}m</text>`;
     }
   }
 
