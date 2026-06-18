@@ -380,6 +380,18 @@ function buildFloorSvg(
   // 정북 이격 기준선: 도로가 있으면 도로 반대편(북단) 경계, 없으면 우리 필지 북단
   const northRef = northRoad ? bboxOf(northRoad.polygon).maxY : parcelBox.maxY;
 
+  // ── 우리 필지의 북향 엣지 탐지 (인접대지경계선 형상) ───────────────────────
+  // CCW 폴리곤: outward normal Y = (A.x − B.x)/len > 0 이면 북향
+  const ccwParcel = signedArea2D(parcel) > 0 ? parcel : [...parcel].reverse();
+  const northFacingEdges: [[number,number],[number,number]][] = [];
+  for (let i = 0; i < ccwParcel.length; i++) {
+    const A = ccwParcel[i];
+    const B = ccwParcel[(i + 1) % ccwParcel.length];
+    const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
+    if (len < 0.05) continue;
+    if ((A[0] - B[0]) / len > 0.15) northFacingEdges.push([A, B]);
+  }
+
   // ── ① 건축가능영역: 실제 필지 폴리곤 인셋(BASE_SB) ─────────────────────
   // bbox 직사각형 인셋 대신 폴리곤 인셋을 사용해 불규칙(사다리꼴 등) 필지도
   // 건축가능영역이 실제 필지 경계선 밖으로 나가지 않도록 정확히 처리
@@ -495,9 +507,19 @@ function buildFloorSvg(
   }
 
   // 정북일조 이격 적용
-  // northRef = 인접대지경계선 (도로 없음 → 우리 필지 북단, 도로 있음 → 도로 북단)
-  // 각 층은 자기 높이 기준으로 northLimitY를 계산 → 층별 다른 풋프린트 (계단식 매스)
-  const bldgNorthLimit = northRef - northSetbackM;
+  // 제한선 폴리선: 도로 있으면 northRef 기준 수평, 없으면 북향 엣지 형태를 따름
+  const restrictionSegs: [[number,number],[number,number]][] = northRoad
+    ? [[[parcelBox.minX, northRef - northSetbackM],[parcelBox.maxX, northRef - northSetbackM]]]
+    : northFacingEdges.map(([A, B]) => [
+        [A[0], A[1] - northSetbackM],
+        [B[0], B[1] - northSetbackM],
+      ] as [[number,number],[number,number]]);
+
+  // 건물 북단 한계: 제한선의 최소 Y (가장 제약적인 지점 기준, 보수적)
+  const bldgNorthLimit = restrictionSegs.length > 0
+    ? Math.min(...restrictionSegs.flatMap(([rA, rB]) => [rA[1], rB[1]]))
+    : northRef - northSetbackM;
+
   const northLimit = Math.max(bzMinY + EPS, Math.min(bldgNorthLimit, bzMaxY - EPS));
   const bestRes = findMaxRect(bzMinY, northLimit);
 
@@ -591,30 +613,51 @@ function buildFloorSvg(
   // ⑦ 정북일조제한선 + 북측 기준경계선 + 치수선
   if (!is공동주택) {
 
-    // 정북일조제한선 — 인접대지경계선(northRef)에서 수직 이격한 수평선
-    if (northSetbackM > 0 && bldgNorthLimit < northRef) {
-      const [lx1, ly] = toSvg(parcelBox.minX, bldgNorthLimit);
-      const [lx2,   ] = toSvg(parcelBox.maxX, bldgNorthLimit);
-      const [, refY]  = toSvg(0, northRef);
+    // ⑦-a 정북일조제한선: 인접대지경계선 형태를 따르는 폴리선
+    if (northSetbackM > 0 && restrictionSegs.length > 0) {
+      for (const [rA, rB] of restrictionSegs) {
+        const [ax, ay] = toSvg(rA[0], rA[1]);
+        const [bx, by] = toSvg(rB[0], rB[1]);
+        els += `<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#d97706" stroke-width="2" stroke-dasharray="6,3"/>`;
+      }
 
-      // 제한선 수평선
-      els += `<line x1="${lx1.toFixed(1)}" y1="${ly.toFixed(1)}" x2="${lx2.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#d97706" stroke-width="2" stroke-dasharray="6,3"/>`;
+      // 라벨: 이격대 중간 (제한선 세그먼트 중앙 ~ northRef 중점)
+      const allRPts = restrictionSegs.flatMap(([rA, rB]) => [rA, rB]);
+      const rMidX   = allRPts.reduce((s, p) => s + p[0], 0) / allRPts.length;
+      const rMidY   = allRPts.reduce((s, p) => s + p[1], 0) / allRPts.length;
+      const [lmSvgX, ] = toSvg(rMidX, 0);
+      const [, lmSvgY] = toSvg(0, (rMidY + northRef) / 2);
+      const lbl = `정북일조제한선 (h=${floorTopH.toFixed(1)}m → ${northSetbackM.toFixed(2)}m)`;
+      els += `<rect x="${(lmSvgX - 78).toFixed(0)}" y="${(lmSvgY - 8).toFixed(0)}" width="156" height="10" fill="white" fill-opacity="0.85" rx="1"/>`;
+      els += `<text x="${lmSvgX.toFixed(0)}" y="${lmSvgY.toFixed(0)}" text-anchor="middle" font-size="6.5" fill="#b45309">${lbl}</text>`;
 
-      // 라벨: 이격대 중간(northRef~bldgNorthLimit 중점)에 배치 → 건물 내부 비침 없음
-      const [, midLabelY] = toSvg(0, (northRef + bldgNorthLimit) / 2);
-      const midSvgX = ((lx1 + lx2) / 2).toFixed(0);
-      const lbl = `정북일조제한선 (h=${floorTopH.toFixed(1)}m → ${northSetbackM.toFixed(2)}m 이격)`;
-      els += `<rect x="${(Number(midSvgX) - 80).toFixed(0)}" y="${(midLabelY - 8).toFixed(0)}" width="160" height="10" fill="white" fill-opacity="0.85" rx="1"/>`;
-      els += `<text x="${midSvgX}" y="${midLabelY.toFixed(0)}" text-anchor="middle" font-size="6.5" fill="#b45309">${lbl}</text>`;
+      // ⑦-b 치수선: 인접대지경계선 → 제한선 (수직)
+      // 기준점: 가장 서쪽 북향 엣지의 서쪽 끝점 (도로 있으면 parcelBox.minX 기준)
+      let dimRefY: number, dimLimitY: number;
+      if (northRoad) {
+        dimRefY   = northRef;
+        dimLimitY = northRef - northSetbackM;
+      } else {
+        const leftEdge = northFacingEdges.reduce((m, e) =>
+          Math.min(e[0][0], e[1][0]) < Math.min(m[0][0], m[1][0]) ? e : m);
+        const leftPt = leftEdge[0][0] <= leftEdge[1][0] ? leftEdge[0] : leftEdge[1];
+        dimRefY   = leftPt[1];
+        dimLimitY = leftPt[1] - northSetbackM;
+      }
+      const [, dimRefSvgY  ] = toSvg(0, dimRefY);
+      const [, dimLimitSvgY] = toSvg(0, dimLimitY);
+      const [dimSvgXbase,  ] = toSvg(parcelBox.minX, 0);
+      const dimX = Math.max(8, dimSvgXbase - 16);
 
-      // 치수선 (왼쪽: northRef ↔ 제한선)
-      const dimX = Math.max(8, lx1 - 16);
-      els += `<line x1="${dimX}" y1="${refY.toFixed(1)}" x2="${dimX}" y2="${ly.toFixed(1)}" stroke="#d97706" stroke-width="0.8" stroke-dasharray="2,2"/>`;
-      els += `<line x1="${(dimX-3).toFixed(0)}" y1="${refY.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${refY.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
-      els += `<line x1="${(dimX-3).toFixed(0)}" y1="${ly.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${ly.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
-      const midDimY = ((refY + ly) / 2).toFixed(0);
-      els += `<rect x="${(dimX - 21).toFixed(0)}" y="${(Number(midDimY) - 8).toFixed(0)}" width="20" height="10" fill="white" fill-opacity="0.9" rx="1"/>`;
-      els += `<text x="${(dimX - 11).toFixed(0)}" y="${midDimY}" text-anchor="middle" font-size="7" fill="#b45309">${northSetbackM.toFixed(2)}m</text>`;
+      els += `<line x1="${dimX}" y1="${dimRefSvgY.toFixed(1)}" x2="${dimX}" y2="${dimLimitSvgY.toFixed(1)}" stroke="#d97706" stroke-width="0.8" stroke-dasharray="2,2"/>`;
+      // 인접대지경계선 틱
+      els += `<line x1="${(dimX-3).toFixed(0)}" y1="${dimRefSvgY.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${dimRefSvgY.toFixed(1)}" stroke="#d97706" stroke-width="1.2"/>`;
+      // 제한선 틱
+      els += `<line x1="${(dimX-3).toFixed(0)}" y1="${dimLimitSvgY.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${dimLimitSvgY.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
+      // 치수 텍스트
+      const midDimSvgY = ((dimRefSvgY + dimLimitSvgY) / 2).toFixed(0);
+      els += `<rect x="${(dimX - 21).toFixed(0)}" y="${(Number(midDimSvgY) - 8).toFixed(0)}" width="20" height="10" fill="white" fill-opacity="0.9" rx="1"/>`;
+      els += `<text x="${(dimX - 11).toFixed(0)}" y="${midDimSvgY}" text-anchor="middle" font-size="7" fill="#b45309">${northSetbackM.toFixed(2)}m</text>`;
     }
   }
 
