@@ -374,33 +374,35 @@ function buildFloorSvg(
     return xOv > 0 && ab.minY < parcelBox.maxY + 30 && ab.maxY > parcelBox.minY - 15;
   });
 
-  // northAdj: 표시용 — 우리 필지 북쪽 30m 이내 X 겹침 필지
+  // northAdj: 북쪽 관련 필지 — maxY 기준 (도로가 남쪽으로 뻗어도 포함)
+  // 기존 minY 기준은 도로 폴리곤이 남쪽으로 크게 뻗을 경우 제외됨 → maxY 기준으로 전환
   const northAdj = allNearby.filter(ap => {
     const ab = bboxOf(ap.polygon);
-    const xOv = Math.min(ab.maxX, parcelBox.maxX) - Math.max(ab.minX, parcelBox.minX);
-    return xOv > 0.5 && ab.minY > parcelBox.maxY - adjTol && ab.minY < parcelBox.maxY + 30;
+    const xOv = Math.min(ab.maxX, parcelBox.maxX + adjTol) - Math.max(ab.minX, parcelBox.minX - adjTol);
+    return xOv > 0.5 && ab.maxY > parcelBox.maxY + 0.5 && ab.minY < parcelBox.maxY + 30;
   }).sort((a, b) => bboxOf(a.polygon).minY - bboxOf(b.polygon).minY);
 
-  // 도로 필지 탐지 (jimok='도', 위치 무관)
-  const northRoad = northAdj.find(ap => ap.jimok === '도');
+  // 도로 필지 탐지: jimok='도' 또는 동서 방향으로 길고 좁은 띠 (너비>깊이×2.5, 깊이<10m)
+  const northRoad = northAdj.find(ap => {
+    if (ap.jimok === '도') return true;
+    const ab = bboxOf(ap.polygon);
+    return (ab.maxX - ab.minX) > (ab.maxY - ab.minY) * 2.5 && (ab.maxY - ab.minY) < 10;
+  });
 
   // ── northRef 결정: 실제 인접대지경계선 ──────────────────────────────────────
-  // 전략: 직접 접촉 필지의 maxY를 도로 북단으로 간주 (도로 jimok 무관)
-  // 근거: 건축선(우리 대지 북단) 너머 도로 → 도로 반대편이 인접대지경계선
   let northRef: number;
   {
-    const directCands = northAdj.filter(ap => bboxOf(ap.polygon).minY <= parcelBox.maxY + adjTol);
     if (northRoad) {
-      // 도로 필지 직접 탐지
       northRef = bboxOf(northRoad.polygon).maxY;
-    } else if (directCands.length > 0) {
-      const directMaxY = Math.max(...directCands.map(ap => bboxOf(ap.polygon).maxY));
-      const beyondDirect = northAdj.filter(ap => bboxOf(ap.polygon).minY > directMaxY + 0.5);
-      // 직접 접촉 필지 너머에 추가 필지 있음 → 직접 접촉 필지가 도로(미분류 포함)
-      northRef = beyondDirect.length > 0 ? directMaxY : parcelBox.maxY;
     } else {
-      // 직접 접촉 없음 → 가장 가까운 북측 필지 남단 = 인접대지경계선
-      northRef = northAdj.length > 0 ? bboxOf(northAdj[0].polygon).minY : parcelBox.maxY;
+      const directCands = northAdj.filter(ap => bboxOf(ap.polygon).minY <= parcelBox.maxY + adjTol);
+      if (directCands.length > 0) {
+        const directMaxY = Math.max(...directCands.map(ap => bboxOf(ap.polygon).maxY));
+        const beyondDirect = northAdj.filter(ap => bboxOf(ap.polygon).minY > directMaxY + 0.5);
+        northRef = beyondDirect.length > 0 ? directMaxY : parcelBox.maxY;
+      } else {
+        northRef = northAdj.length > 0 ? bboxOf(northAdj[0].polygon).minY : parcelBox.maxY;
+      }
     }
   }
   const roadOffset = northRef - parcelBox.maxY; // 도로 폭 (0이면 도로 없음)
@@ -666,19 +668,9 @@ function buildFloorSvg(
       els += `<rect x="${(lmSvgX - 78).toFixed(0)}" y="${(lmSvgY - 8).toFixed(0)}" width="156" height="10" fill="white" fill-opacity="0.85" rx="1"/>`;
       els += `<text x="${lmSvgX.toFixed(0)}" y="${lmSvgY.toFixed(0)}" text-anchor="middle" font-size="6.5" fill="#b45309">${lbl}</text>`;
 
-      // ⑦-b 치수선: 인접대지경계선 → 제한선 (수직)
-      // 기준점: 가장 서쪽 북향 엣지의 서쪽 끝점 (도로 있으면 parcelBox.minX 기준)
-      let dimRefY: number, dimLimitY: number;
-      if (northRoad) {
-        dimRefY   = northRef;
-        dimLimitY = northRef - northSetbackM;
-      } else {
-        const leftEdge = northFacingEdges.reduce((m, e) =>
-          Math.min(e[0][0], e[1][0]) < Math.min(m[0][0], m[1][0]) ? e : m);
-        const leftPt = leftEdge[0][0] <= leftEdge[1][0] ? leftEdge[0] : leftEdge[1];
-        dimRefY   = leftPt[1];
-        dimLimitY = leftPt[1] - northSetbackM;
-      }
+      // ⑦-b 치수선: 인접대지경계선(northRef) → 제한선 (항상 northRef 기준)
+      const dimRefY   = northRef;
+      const dimLimitY = northRef - northSetbackM;
       const [, dimRefSvgY  ] = toSvg(0, dimRefY);
       const [, dimLimitSvgY] = toSvg(0, dimLimitY);
       const [dimSvgXbase,  ] = toSvg(parcelBox.minX, 0);
