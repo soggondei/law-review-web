@@ -187,10 +187,13 @@ function polyIntervalsAtY(poly: [number, number][], y: number): [number, number]
   return result;
 }
 
-// ── 정북일조 이격거리 계산 (건축법 제61조) ────────────────────────────────────
-function calcNorthSetback(floorBottomH: number): number {
-  if (floorBottomH <= 9) return 0;
-  return (floorBottomH - 9) * 0.5;
+// ── 정북일조 이격거리 계산 (건축법 제61조·시행령 제86조) ─────────────────────
+// 비공동주택: 층 상단 높이 기준 — h≤9m: 1.5m / h>9m: h/2
+// 공동주택(아파트·연립·다세대·기숙사): 채광기준(제61조제2항) 별도 적용 → 0 반환
+function calcNorthSetback(floorTopH: number, 용도: string): number {
+  const is공동주택 = ["아파트","연립주택","다세대주택","기숙사"].some(k => 용도.includes(k));
+  if (is공동주택) return 0;
+  return floorTopH <= 9 ? 1.5 : floorTopH / 2;
 }
 
 // ── Point-in-polygon (ray casting) ───────────────────────────────────────────
@@ -249,9 +252,10 @@ function buildFloorSvg(
   층고: number,
   parcelPts: [number, number][] | null,
 ): { svg: string; area: number } {
-  const W = 400, H = 320;
-  const floorBottomH   = floorIdx * 층고;
-  const northSetbackM  = calcNorthSetback(floorBottomH);
+  const W = 530, H = 360;
+  const floorBottomH = floorIdx * 층고;
+  const floorTopH    = (floorIdx + 1) * 층고;
+  const northSetbackM = calcNorthSetback(floorTopH, input.용도);
 
   // ── 법적 이격 상수 ─────────────────────────────────────────────────────
   const BASE_SB   = 0.5;    // 대지안의 공지 (인접 대지경계선, 기본 0.5m)
@@ -388,37 +392,42 @@ function buildFloorSvg(
     return best;
   }
 
-  // 정북일조 이격 적용 후 인셋 폴리곤 전체에서 최대 직사각형 탐색
-  const northLimit = bzMaxY - northSetbackM;
+  // 정북일조 이격 적용: 북측 대지경계선(parcelBox.maxY) 기준
+  // 비공동주택: 최소 1.5m 항상 적용 → bldgNorthLimit < bzMaxY 보장
+  const bldgNorthLimit = parcelBox.maxY - northSetbackM;
+  const northLimit = Math.max(bzMinY + EPS, Math.min(bldgNorthLimit, bzMaxY - EPS));
   const bestRes = findMaxRect(bzMinY, northLimit);
-
 
   const bMinX = bestRes.minX;
   const bMaxX = bestRes.maxX;
   const bMinY = bestRes.minY;
   const bMaxY = bestRes.maxY;
-  const fW    = bMaxX - bMinX;   // 치수선용
-  const fH    = bMaxY - bMinY;   // 치수선용
+  const fW    = bMaxX - bMinX;
+  const fH    = bMaxY - bMinY;
   const area  = parseFloat((fW * fH).toFixed(2));
 
-  // 정북일조 이격대 북단 (건물이 닿을 수 있는 최북단)
-  const bldgNorthLimit = bzMaxY - northSetbackM;
-
   // ── SVG 좌표 변환 ─────────────────────────────────────────────────────
-  // 필지가 (0,0) 중심이므로 SVG_CX/CY 에 (0,0) 매핑 → 항상 중앙 정렬
+  // 필지가 (0,0) 중심. 드로잉 영역은 좌측 400px, 우측 130px = 이격거리 표
   const PAD = 3;
   const dataW = parcelBox.maxX - parcelBox.minX + PAD * 2;
-  const dataH = parcelBox.maxY - parcelBox.minY + PAD * 2 + northSetbackM;
-  const sc    = Math.min(250 / dataW, 200 / dataH);
-  const SVG_CX = W / 2;
-  const SVG_CY = 44 + (H - 44 - 28) / 2;
+  const dataH = parcelBox.maxY - parcelBox.minY + PAD * 2;
+  const sc    = Math.min(240 / dataW, 230 / dataH);
+  const SVG_CX = 200; // 드로잉 영역(0-400) 중앙
+  const SVG_CY = 44 + (H - 44 - 30) / 2;
 
   const toSvg = (x: number, y: number): [number, number] =>
     [SVG_CX + x * sc, SVG_CY - y * sc];
   const ptStr = (pts: [number, number][]) =>
     pts.map(([x, y]) => toSvg(x, y).map(v => v.toFixed(1)).join(",")).join(" ");
 
-  let els = '';
+  const is공동주택 = ["아파트","연립주택","다세대주택","기숙사"].some(k => input.용도.includes(k));
+
+  // ── hatch 패턴 정의 ─────────────────────────────────────────────────
+  let els = `<defs>
+  <pattern id="northHatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="8" stroke="#d97706" stroke-width="1.5" opacity="0.35"/>
+  </pattern>
+</defs>`;
 
   // 헤더
   els += `<text x="200" y="16" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#1e3a5f">${input.용도} · 대지 ${input.대지면적.toFixed(0)}㎡</text>`;
@@ -426,37 +435,49 @@ function buildFloorSvg(
   // ① 필지 경계 (이점쇄선)
   els += `<polygon points="${ptStr(parcel)}" fill="#fefce8" stroke="#a3a3a3" stroke-width="1.5" stroke-dasharray="12,3,2,3,2,3"/>`;
 
-  // ② 건축가능영역 배경 채우기 (테두리는 건물 위에 별도로 그림)
+  // ② 건축가능영역 배경
   els += `<polygon points="${ptStr(buildableRect)}" fill="#eff6ff" fill-opacity="0.4" stroke="none"/>`;
 
-  // ③ 정북일조 이격대 (amber, 건물 북단~건축가능영역 북단)
-  if (northSetbackM > 0) {
+  // ③ 정북일조 이격대: 대지 북측 경계선 ~ bldgNorthLimit (해칭)
+  if (!is공동주택) {
     const sbPts: [number,number][] = [
-      [bzMinX, bldgNorthLimit], [bzMaxX, bldgNorthLimit],
-      [bzMaxX, bzMaxY],         [bzMinX, bzMaxY],
+      [parcelBox.minX, bldgNorthLimit], [parcelBox.maxX, bldgNorthLimit],
+      [parcelBox.maxX, parcelBox.maxY], [parcelBox.minX, parcelBox.maxY],
     ];
-    els += `<polygon points="${ptStr(sbPts)}" fill="#fef3c7" fill-opacity="0.9" stroke="none"/>`;
+    els += `<polygon points="${ptStr(sbPts)}" fill="url(#northHatch)" stroke="none"/>`;
+    els += `<polygon points="${ptStr(sbPts)}" fill="#fef3c7" fill-opacity="0.35" stroke="none"/>`;
   }
 
-  // ④ 건물 매스 (파랑) — 건축가능영역 내부에 정확히 배치
+  // ④ 건물 매스
   const bPts: [number,number][] = [[bMinX,bMinY],[bMaxX,bMinY],[bMaxX,bMaxY],[bMinX,bMaxY]];
   els += `<polygon points="${ptStr(bPts)}" fill="#3b82f6" fill-opacity="0.30" stroke="#2563eb" stroke-width="2"/>`;
 
-  // ⑥ 건축가능영역 테두리를 건물 위에 다시 그려 항상 보이게 함
+  // ⑤ 건축가능영역 테두리 (건물 위)
   els += `<polygon points="${ptStr(buildableRect)}" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="5,3"/>`;
 
-  // ⑦ 정북일조 이격대 테두리
-  if (northSetbackM > 0) {
-    const sbPts: [number,number][] = [
-      [bzMinX, bldgNorthLimit], [bzMaxX, bldgNorthLimit],
-      [bzMaxX, bzMaxY],         [bzMinX, bzMaxY],
-    ];
-    els += `<polygon points="${ptStr(sbPts)}" fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2"/>`;
-    const [lx, ly] = toSvg(0, (bldgNorthLimit + bzMaxY) / 2);
-    els += `<text x="${lx.toFixed(0)}" y="${(ly+3).toFixed(0)}" text-anchor="middle" font-size="7.5" fill="#b45309">정북일조 ${northSetbackM.toFixed(1)}m</text>`;
+  // ⑥ 정북일조제한선 + 북측 대지경계선 강조 + 치수선
+  if (!is공동주택) {
+    // 북측 대지경계선 (두꺼운 amber 실선)
+    const [px1, py1] = toSvg(parcelBox.minX, parcelBox.maxY);
+    const [px2,    ] = toSvg(parcelBox.maxX, parcelBox.maxY);
+    els += `<line x1="${px1.toFixed(1)}" y1="${py1.toFixed(1)}" x2="${px2.toFixed(1)}" y2="${py1.toFixed(1)}" stroke="#b45309" stroke-width="2.2"/>`;
+    // 정북일조제한선
+    const [lx1, ly1] = toSvg(parcelBox.minX, bldgNorthLimit);
+    const [lx2,    ] = toSvg(parcelBox.maxX, bldgNorthLimit);
+    els += `<line x1="${lx1.toFixed(1)}" y1="${ly1.toFixed(1)}" x2="${lx2.toFixed(1)}" y2="${ly1.toFixed(1)}" stroke="#d97706" stroke-width="1.8"/>`;
+    // 치수선 (왼쪽 바깥)
+    const dimX = Math.max(8, px1 - 12);
+    els += `<line x1="${dimX}" y1="${py1.toFixed(1)}" x2="${dimX}" y2="${ly1.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
+    els += `<line x1="${dimX-3}" y1="${py1.toFixed(1)}" x2="${dimX+3}" y2="${py1.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
+    els += `<line x1="${dimX-3}" y1="${ly1.toFixed(1)}" x2="${dimX+3}" y2="${ly1.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
+    const midDimY = ((py1 + ly1) / 2 + 3).toFixed(0);
+    els += `<text x="${dimX-4}" y="${midDimY}" text-anchor="end" font-size="7" fill="#b45309">${northSetbackM.toFixed(2)}m</text>`;
+    // 제한선 라벨
+    const labX = ((lx1 + lx2) / 2).toFixed(0);
+    els += `<text x="${labX}" y="${(ly1 - 3).toFixed(0)}" text-anchor="middle" font-size="6.8" fill="#b45309">정북일조제한선 (h=${floorTopH.toFixed(1)}m→${northSetbackM.toFixed(2)}m)</text>`;
   }
 
-  // 필지 경계 테두리를 마지막에 다시 그려 항상 보이게 함
+  // 필지 경계 재드로우
   els += `<polygon points="${ptStr(parcel)}" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-dasharray="12,3,2,3,2,3"/>`;
 
   // 층·면적 라벨
@@ -468,28 +489,27 @@ function buildFloorSvg(
   const [elX, elY] = toSvg(0, bMaxY);
   els += `<text x="${elX.toFixed(0)}" y="${(elY-4).toFixed(0)}" text-anchor="middle" font-size="8.5" fill="#64748b">EL+${floorBottomH.toFixed(1)}m</text>`;
 
-  // ⑥ 범례
-  const LX = W - 102, LY = 20;
+  // 범례 (드로잉 영역 우상단)
+  const LX = 298, LY = 20;
   const legend = [
-    { fill: '#fefce8', stroke: '#a3a3a3', dash: '12,3,2,3,2,3', label: '대지 경계' },
-    { fill: '#eff6ff', stroke: '#93c5fd', dash: '3,2', label: `건축가능영역 (이격${BASE_SB}m)` },
-    ...(northSetbackM > 0 ? [{ fill: '#fef3c7', stroke: '#f59e0b', dash: '3,2', label: `정북일조 ${northSetbackM.toFixed(1)}m` }] : []),
-    ...(needsParking    ? [{ fill: '#f1f5f9', stroke: '#94a3b8', dash: '',     label: '주차 계획영역' }] : []),
-    ...(needsLandscape  ? [{ fill: '#d1fae5', stroke: '#6ee7b7', dash: '',     label: `조경 ${landscapeArea.toFixed(0)}㎡` }] : []),
+    { fill: '#fefce8', stroke: '#a3a3a3', dash: '12,3,2,3,2,3', label: '대지 경계선' },
+    { fill: '#eff6ff', stroke: '#93c5fd', dash: '3,2', label: `건축가능영역 (${BASE_SB}m 이격)` },
+    ...(!is공동주택 ? [{ fill: '#fef3c7', stroke: '#d97706', dash: '4,2', label: '정북일조 이격대' }] : []),
+    ...(needsParking   ? [{ fill: '#f1f5f9', stroke: '#94a3b8', dash: '', label: '주차 계획영역' }] : []),
+    ...(needsLandscape ? [{ fill: '#d1fae5', stroke: '#6ee7b7', dash: '', label: `조경 ${landscapeArea.toFixed(0)}㎡` }] : []),
   ];
   legend.forEach(({ fill, stroke, dash, label }, i) => {
     const y = LY + i * 13;
     els += `<rect x="${LX}" y="${y}" width="9" height="9" fill="${fill}" stroke="${stroke}" stroke-width="0.8" ${dash ? `stroke-dasharray="${dash}"` : ''}/>`;
-    els += `<text x="${LX+13}" y="${y+7}" font-size="7.5" fill="#374151">${label}</text>`;
+    els += `<text x="${LX+13}" y="${y+7}" font-size="7" fill="#374151">${label}</text>`;
   });
 
-  // 북 화살표 (좌상단)
-  const [nax, nay] = [18, 50];
-  els += `<line x1="${nax}" y1="${nay+18}" x2="${nax}" y2="${nay+2}" stroke="#ef4444" stroke-width="2"/>`;
-  els += `<polygon points="${nax},${nay+2} ${nax-4},${nay+10} ${nax+4},${nay+10}" fill="#ef4444"/>`;
-  els += `<text x="${nax}" y="${nay+28}" text-anchor="middle" font-size="9" font-weight="bold" fill="#ef4444">N</text>`;
+  // 북 화살표
+  els += `<line x1="18" y1="68" x2="18" y2="52" stroke="#ef4444" stroke-width="2"/>`;
+  els += `<polygon points="18,52 14,60 22,60" fill="#ef4444"/>`;
+  els += `<text x="18" y="78" text-anchor="middle" font-size="9" font-weight="bold" fill="#ef4444">N</text>`;
 
-  // 치수선 — 가로
+  // 치수선 — 가로 (건물 폭)
   const [bbl_x, bbl_y] = toSvg(bMinX, bMinY);
   const [bbr_x, bbr_y] = toSvg(bMaxX, bMinY);
   const dY = Math.max(bbl_y, bbr_y) + 9;
@@ -498,7 +518,7 @@ function buildFloorSvg(
   els += `<line x1="${bbr_x.toFixed(1)}" y1="${dY-3}" x2="${bbr_x.toFixed(1)}" y2="${dY+3}" stroke="#94a3b8" stroke-width="0.8"/>`;
   els += `<text x="${((bbl_x+bbr_x)/2).toFixed(0)}" y="${dY+10}" text-anchor="middle" font-size="8.5" fill="#64748b">${fW.toFixed(1)}m</text>`;
 
-  // 치수선 — 세로
+  // 치수선 — 세로 (건물 깊이)
   const [btr_x, btr_y] = toSvg(bMaxX, bMaxY);
   const [bbr2_x, bbr2_y] = toSvg(bMaxX, bMinY);
   const dX = Math.max(btr_x, bbr2_x) + 9;
@@ -507,9 +527,66 @@ function buildFloorSvg(
   els += `<line x1="${dX-3}" y1="${bbr2_y.toFixed(1)}" x2="${dX+3}" y2="${bbr2_y.toFixed(1)}" stroke="#94a3b8" stroke-width="0.8"/>`;
   els += `<text x="${dX+4}" y="${((btr_y+bbr2_y)/2+3).toFixed(0)}" font-size="8.5" fill="#64748b">${fH.toFixed(1)}m</text>`;
 
+  // ── 우측 패널: 정북일조 이격거리 표 ───────────────────────────────────────
+  els += `<line x1="402" y1="14" x2="402" y2="${H-8}" stroke="#e2e8f0" stroke-width="0.8"/>`;
+  const TBX = 407;
+  let ty = 22;
+
+  if (is공동주택) {
+    els += `<text x="${TBX}" y="${ty}" font-size="8" font-weight="bold" fill="#1e3a5f">■ 채광기준 적용</text>`;
+    ty += 11;
+    els += `<text x="${TBX}" y="${ty}" font-size="6.5" fill="#6b7280">건축법 제61조 제2항</text>`;
+    ty += 14;
+    els += `<rect x="${TBX}" y="${ty}" width="116" height="42" fill="#fff7ed" rx="2" stroke="#fed7aa" stroke-width="0.5"/>`;
+    ty += 12;
+    els += `<text x="${TBX+5}" y="${ty}" font-size="7" fill="#92400e">공동주택: 채광기준 별도 적용</text>`;
+    ty += 10;
+    els += `<text x="${TBX+5}" y="${ty}" font-size="7" fill="#92400e">정북일조 사선 미적용</text>`;
+    ty += 10;
+    els += `<text x="${TBX+5}" y="${ty}" font-size="7" fill="#92400e">인동간격 별도 검토 요</text>`;
+  } else {
+    els += `<text x="${TBX}" y="${ty}" font-size="8" font-weight="bold" fill="#1e3a5f">■ 정북일조 이격거리</text>`;
+    ty += 11;
+    els += `<text x="${TBX}" y="${ty}" font-size="6.5" fill="#6b7280">건축법시행령 제86조 제1항</text>`;
+    ty += 12;
+    // 표 헤더
+    els += `<rect x="${TBX}" y="${ty-8}" width="116" height="11" fill="#dbeafe" rx="1"/>`;
+    els += `<text x="${TBX+13}" y="${ty}" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#1e40af">층</text>`;
+    els += `<text x="${TBX+56}" y="${ty}" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#1e40af">층상단높이</text>`;
+    els += `<text x="${TBX+100}" y="${ty}" text-anchor="middle" font-size="6.5" font-weight="bold" fill="#1e40af">이격거리</text>`;
+    ty += 12;
+    for (let fi = 0; fi < Math.min(input.층수, 10); fi++) {
+      const topH = (fi + 1) * 층고;
+      const sb   = topH <= 9 ? 1.5 : topH / 2;
+      const isCurrent = fi === floorIdx;
+      if (isCurrent) {
+        els += `<rect x="${TBX}" y="${ty-8}" width="116" height="11" fill="#eff6ff" rx="0"/>`;
+      }
+      const txtFill = isCurrent ? "#1d4ed8" : (sb > 1.5 ? "#b45309" : "#374151");
+      const fw = isCurrent ? "bold" : "normal";
+      els += `<text x="${TBX+13}" y="${ty}" text-anchor="middle" font-size="6.5" fill="${txtFill}" font-weight="${fw}">${fi+1}F</text>`;
+      els += `<text x="${TBX+56}" y="${ty}" text-anchor="middle" font-size="6.5" fill="${txtFill}">${topH.toFixed(1)}m</text>`;
+      els += `<text x="${TBX+100}" y="${ty}" text-anchor="middle" font-size="6.5" fill="${txtFill}" font-weight="${fw}">${sb.toFixed(2)}m</text>`;
+      ty += 11;
+      if (fi < input.층수 - 1 && fi < 9) {
+        els += `<line x1="${TBX}" y1="${ty-2}" x2="${TBX+116}" y2="${ty-2}" stroke="#e2e8f0" stroke-width="0.3"/>`;
+      }
+    }
+    ty += 5;
+    els += `<line x1="${TBX}" y1="${ty}" x2="${TBX+116}" y2="${ty}" stroke="#e2e8f0" stroke-width="0.5"/>`;
+    ty += 9;
+    els += `<text x="${TBX}" y="${ty}" font-size="6" fill="#6b7280">* 9m 이하: 1.5m 이상</text>`;
+    ty += 8;
+    els += `<text x="${TBX}" y="${ty}" font-size="6" fill="#6b7280">* 9m 초과: 높이×1/2</text>`;
+    ty += 8;
+    els += `<text x="${TBX}" y="${ty}" font-size="6" fill="#6b7280">* 북측 도로시: 반대편</text>`;
+    ty += 8;
+    els += `<text x="${TBX}" y="${ty}" font-size="6" fill="#6b7280">  경계선 기준 (도로 완화)</text>`;
+  }
+
   // 푸터
   els += `<text x="200" y="${H-14}" text-anchor="middle" font-size="8" fill="#9ca3af">대지안의 공지 ${BASE_SB}m · 건폐율 ${input.건폐율}% · 용적률 ${input.용적률}%</text>`;
-  els += `<text x="200" y="${H-3}" text-anchor="middle" font-size="8" fill="#9ca3af">층고 ${층고.toFixed(1)}m · 총높이 ${(input.층수*층고).toFixed(1)}m${needsLandscape ? ` · 조경 ${landscapeArea.toFixed(0)}㎡` : ''}</text>`;
+  els += `<text x="200" y="${H-3}" text-anchor="middle" font-size="8" fill="#9ca3af">층고 ${층고.toFixed(1)}m · 총높이 ${(input.층수*층고).toFixed(1)}m</text>`;
 
   return {
     svg: `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="auto" viewBox="0 0 ${W} ${H}" font-family="sans-serif">
