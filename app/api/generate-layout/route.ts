@@ -327,6 +327,9 @@ function buildFloorSvg(
   const floorBottomH = floorIdx * 층고;
   const floorTopH    = (floorIdx + 1) * 층고;
   const northSetbackM = calcNorthSetback(floorTopH, input.용도);
+  // 건물 풋프린트는 최종층 높이 기준 최대 이격으로 고정 → 모든 층 동일 풋프린트
+  const maxFloorTopH      = input.층수 * 층고;
+  const maxNorthSetbackM  = calcNorthSetback(maxFloorTopH, input.용도);
 
   // ── 법적 이격 상수 ─────────────────────────────────────────────────────
   const BASE_SB   = 0.5;    // 대지안의 공지 (인접 대지경계선, 기본 0.5m)
@@ -496,9 +499,12 @@ function buildFloorSvg(
 
   // 정북일조 이격 적용
   // northRef = 우리 필지 북단(도로 없음) 또는 북측 도로 반대편 경계선
-  const bldgNorthLimit = northRef - northSetbackM;
-  const northLimit = Math.max(bzMinY + EPS, Math.min(bldgNorthLimit, bzMaxY - EPS));
+  // 건물 풋프린트: 최대 이격(최종층 기준) → 모든 층 동일한 북측 한계
+  const fixedBldgNorthLimit = northRef - maxNorthSetbackM;
+  const northLimit = Math.max(bzMinY + EPS, Math.min(fixedBldgNorthLimit, bzMaxY - EPS));
   const bestRes = findMaxRect(bzMinY, northLimit);
+  // 이 층의 제한선: 시각화 표시 전용 (제한선·이격대 렌더링에만 사용)
+  const bldgNorthLimit = northRef - northSetbackM;
 
   const bMinX = bestRes.minX;
   const bMaxX = bestRes.maxX;
@@ -513,7 +519,7 @@ function buildFloorSvg(
   const PAD       = 3;
   const parcelNS  = parcelBox.maxY - parcelBox.minY;
   // 북쪽으로 보여줄 범위: 정북이격 + 여유 1m (최소 3m, 최대 5m)
-  const northShow = Math.max(3, Math.min(northSetbackM + 1, 5));
+  const northShow = Math.max(3, Math.min(maxNorthSetbackM + 1, 5));
   // 스케일: 우리 필지 + 북쪽 노출 범위를 기준으로 계산
   const dataW = parcelBox.maxX - parcelBox.minX + PAD * 2;
   const dataH = parcelNS + northShow + PAD * 2;
