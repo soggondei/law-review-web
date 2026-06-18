@@ -95,6 +95,45 @@ export function parseVworldRings(
   return rings;
 }
 
+export interface VworldFeature {
+  polygon: [number, number][];
+  props: Record<string, string>;
+}
+
+/** Parse Vworld GeoJSON including feature properties (JIMOK 지목 etc.) */
+export function parseVworldFeatures(
+  vwData: unknown,
+  toLocal: (pt: number[]) => [number, number],
+): VworldFeature[] {
+  const data = vwData as { response?: { result?: { featureCollection?: { features?: unknown[] } } } };
+  const features = data?.response?.result?.featureCollection?.features ?? [];
+  const result: VworldFeature[] = [];
+
+  for (const f of features as Array<{
+    geometry?: { type?: string; coordinates?: unknown };
+    properties?: Record<string, string>;
+  }>) {
+    const geom = f.geometry;
+    if (!geom) continue;
+    const rawRings: number[][][] =
+      geom.type === "Polygon" ? (geom.coordinates as number[][][])
+      : geom.type === "MultiPolygon" ? (geom.coordinates as number[][][][]).flat()
+      : [];
+
+    for (const ring of rawRings) {
+      const pts = ring.map(toLocal);
+      if (pts.length > 1) {
+        const [fx, fy] = pts[0], [lx, ly] = pts[pts.length - 1];
+        if (Math.abs(fx - lx) < 1e-6 && Math.abs(fy - ly) < 1e-6) pts.pop();
+      }
+      if (pts.length >= 3) {
+        result.push({ polygon: pts as [number, number][], props: f.properties ?? {} });
+      }
+    }
+  }
+  return result;
+}
+
 // ── Open-Elevation (SRTM) with Open-Topo-Data fallback ───────────────────────
 
 export const GEO_GRID_N = 5;
