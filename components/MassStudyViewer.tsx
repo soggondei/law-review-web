@@ -93,33 +93,92 @@ export default function MassStudyViewer({ floors, stats }: { floors: FloorData[]
         </button>
       </div>
 
-      {/* 줌·패닝 SVG 박스 */}
-      <div
-        className="relative bg-slate-50 rounded-xl border border-gray-200 overflow-hidden cursor-grab active:cursor-grabbing select-none"
-        style={{ height: 340, touchAction: "none" }}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerLeave={onPointerUp}
-        onWheel={onWheel}
-      >
+      {/* 2열 레이아웃: 왼쪽 SVG, 오른쪽 표 */}
+      <div className="flex gap-3 items-stretch">
+        {/* 왼쪽: SVG 뷰어 */}
         <div
-          style={{
-            transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-            transformOrigin: "center center",
-            width: "100%",
-            height: "100%",
-            willChange: "transform",
-          }}
-          dangerouslySetInnerHTML={{ __html: current.svg }}
-        />
-        <div className="absolute bottom-2 right-2 pointer-events-none flex items-center gap-1.5">
-          <span className="text-[10px] text-gray-500 bg-white/90 rounded-md px-1.5 py-0.5 shadow-sm">
-            {(scale * 100).toFixed(0)}%
-          </span>
-          <span className="text-[9px] text-gray-400 bg-white/80 rounded-md px-1.5 py-0.5">
-            스크롤 확대 · 드래그 이동
-          </span>
+          className="flex-1 min-w-0 relative bg-slate-50 rounded-xl border border-gray-200 overflow-hidden cursor-grab active:cursor-grabbing select-none"
+          style={{ height: 420, touchAction: "none" }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerLeave={onPointerUp}
+          onWheel={onWheel}
+        >
+          <div
+            style={{
+              transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+              transformOrigin: "center center",
+              width: "100%",
+              height: "100%",
+              willChange: "transform",
+            }}
+            dangerouslySetInnerHTML={{ __html: current.svg }}
+          />
+          <div className="absolute bottom-2 right-2 pointer-events-none flex items-center gap-1.5">
+            <span className="text-[10px] text-gray-500 bg-white/90 rounded-md px-1.5 py-0.5 shadow-sm">
+              {(scale * 100).toFixed(0)}%
+            </span>
+            <span className="text-[9px] text-gray-400 bg-white/80 rounded-md px-1.5 py-0.5">
+              스크롤 확대 · 드래그 이동
+            </span>
+          </div>
+        </div>
+
+        {/* 오른쪽: 정북일조 표 */}
+        <div className="w-52 shrink-0 flex flex-col gap-2">
+          {!stats.is공동주택 ? (
+            <div className="border border-gray-200 rounded-xl overflow-hidden flex flex-col" style={{ height: 420 }}>
+              <div className="bg-slate-50 px-2 py-1.5 border-b border-gray-200">
+                <div className="text-[10px] font-semibold text-slate-700">정북일조 이격거리</div>
+                <div className="text-[8px] text-slate-400">건축법시행령 제86조 제1항</div>
+              </div>
+              <div className="overflow-y-auto flex-1">
+                <table className="w-full text-[10px]">
+                  <thead className="sticky top-0">
+                    <tr className="bg-blue-50 text-blue-700 font-semibold">
+                      <th className="px-2 py-1.5 text-center">층</th>
+                      <th className="px-2 py-1.5 text-center">높이</th>
+                      <th className="px-2 py-1.5 text-center">이격</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: stats.층수 }, (_, fi) => {
+                      const topH = (fi + 1) * stats.층고;
+                      const setback = topH <= 10 ? 1.5 : topH / 2;
+                      const isCurrent = fi === activeFloor;
+                      const isWarn = setback > 1.5;
+                      return (
+                        <tr
+                          key={fi}
+                          className={`border-t border-gray-100 ${isCurrent ? "bg-blue-50" : ""}`}
+                        >
+                          <td className={`px-2 py-1 text-center font-medium ${isCurrent ? "text-blue-600" : "text-gray-700"}`}>
+                            {fi + 1}F
+                          </td>
+                          <td className={`px-2 py-1 text-center ${isCurrent ? "text-blue-600" : "text-gray-500"}`}>
+                            {topH.toFixed(1)}m
+                          </td>
+                          <td className={`px-2 py-1 text-center font-semibold ${isCurrent ? "text-blue-700" : isWarn ? "text-amber-600" : "text-gray-700"}`}>
+                            {setback.toFixed(2)}m
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="px-2 py-1.5 bg-slate-50 border-t border-gray-100 text-[8px] text-slate-400 space-y-0.5">
+                <div>* 10m 이하: 1.5m 이상</div>
+                <div>* 10m 초과: 높이×1/2</div>
+                <div>* 북측 도로시: 반대편 경계선 기준</div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-orange-50 border border-orange-200 rounded-xl px-3 py-2 text-[10px] text-orange-700">
+              <span className="font-semibold">공동주택</span> — 정북일조 미적용 · 채광기준(제61조 제2항) 별도 검토
+            </div>
+          )}
         </div>
       </div>
 
@@ -138,57 +197,6 @@ export default function MassStudyViewer({ floors, stats }: { floors: FloorData[]
           </div>
         ))}
       </div>
-
-      {/* 정북일조 이격거리 표 */}
-      {!stats.is공동주택 ? (
-        <div className="mt-3 border border-gray-200 rounded-xl overflow-hidden">
-          <div className="bg-slate-50 px-3 py-1.5 border-b border-gray-200 flex items-center gap-2">
-            <span className="text-[10px] font-semibold text-slate-700">정북일조 이격거리</span>
-            <span className="text-[9px] text-slate-400">건축법시행령 제86조 제1항</span>
-          </div>
-          <table className="w-full text-[10px]">
-            <thead>
-              <tr className="bg-blue-50 text-blue-700 font-semibold">
-                <th className="px-3 py-1.5 text-center">층</th>
-                <th className="px-3 py-1.5 text-center">층상단높이</th>
-                <th className="px-3 py-1.5 text-center">이격거리</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: stats.층수 }, (_, fi) => {
-                const topH = (fi + 1) * stats.층고;
-                const setback = topH <= 9 ? 1.5 : topH / 2;
-                const isCurrent = fi === activeFloor;
-                const isWarn = setback > 1.5;
-                return (
-                  <tr
-                    key={fi}
-                    className={`border-t border-gray-100 ${isCurrent ? "bg-blue-50" : ""}`}
-                  >
-                    <td className={`px-3 py-1 text-center font-medium ${isCurrent ? "text-blue-600" : "text-gray-700"}`}>
-                      {fi + 1}F
-                    </td>
-                    <td className={`px-3 py-1 text-center ${isCurrent ? "text-blue-600" : "text-gray-500"}`}>
-                      {topH.toFixed(1)}m
-                    </td>
-                    <td className={`px-3 py-1 text-center font-semibold ${isCurrent ? "text-blue-700" : isWarn ? "text-amber-600" : "text-gray-700"}`}>
-                      {setback.toFixed(2)}m
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <div className="px-3 py-1.5 bg-slate-50 border-t border-gray-100 text-[9px] text-slate-400 space-y-0.5">
-            <div>* 9m 이하: 1.5m 이상 · 9m 초과: 높이×1/2</div>
-            <div>* 북측에 도로가 있을 경우 도로 반대편 경계선 기준 (완화 적용)</div>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-3 bg-orange-50 border border-orange-200 rounded-xl px-3 py-2 text-[10px] text-orange-700">
-          <span className="font-semibold">공동주택</span> — 정북일조 사선 미적용 · 채광기준(건축법 제61조 제2항) 별도 검토
-        </div>
-      )}
     </div>
   );
 }

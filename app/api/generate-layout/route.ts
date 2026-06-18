@@ -193,13 +193,13 @@ function polyIntervalsAtY(poly: [number, number][], y: number): [number, number]
   return result;
 }
 
-// ── 정북일조 이격거리 계산 (건축법 제61조·시행령 제86조) ─────────────────────
-// 비공동주택: 층 상단 높이 기준 — h≤9m: 1.5m / h>9m: h/2
+// ── 정북일조 이격거리 계산 (건축법 제61조·시행령 제86조 제1항) ─────────────────
+// 비공동주택: 높이 10m 이하 → 1.5m, 10m 초과 → 높이/2
 // 공동주택(아파트·연립·다세대·기숙사): 채광기준(제61조제2항) 별도 적용 → 0 반환
 function calcNorthSetback(floorTopH: number, 용도: string): number {
   const is공동주택 = ["아파트","연립주택","다세대주택","기숙사"].some(k => 용도.includes(k));
   if (is공동주택) return 0;
-  return floorTopH <= 9 ? 1.5 : floorTopH / 2;
+  return floorTopH <= 10 ? 1.5 : floorTopH / 2;
 }
 
 // ── Point-in-polygon (ray casting) ───────────────────────────────────────────
@@ -544,8 +544,8 @@ function buildFloorSvg(
   const adjClipY = parcelBox.maxY + northShow; // 인접대지 표시 상한 (우리 필지 북단+5m)
   for (const ap of northAdj) {
     const isRoad = ap.jimok === '도';
-    const fill   = isRoad ? '#fef9c3' : '#f1f5f9';
-    const stroke = isRoad ? '#ca8a04' : '#9ca3af';
+    const fill   = isRoad ? '#d1d5db' : '#f1f5f9';
+    const stroke = isRoad ? '#9ca3af' : '#9ca3af';
     const clipped = clipPolygonSouthOf(ap.polygon, adjClipY);
     if (clipped.length < 3) continue;
     els += `<polygon points="${ptStr(clipped)}" fill="${fill}" fill-opacity="0.75" stroke="${stroke}" stroke-width="0.8" stroke-dasharray="3,2"/>`;
@@ -576,7 +576,7 @@ function buildFloorSvg(
         [parcelBox.minX, parcelBox.maxY], [parcelBox.maxX, parcelBox.maxY],
         [parcelBox.maxX, northRef],       [parcelBox.minX, northRef],
       ];
-      els += `<polygon points="${ptStr(roadBands)}" fill="#fef9c3" fill-opacity="0.3" stroke="none"/>`;
+      els += `<polygon points="${ptStr(roadBands)}" fill="#d1d5db" fill-opacity="0.3" stroke="none"/>`;
     }
   }
 
@@ -589,16 +589,8 @@ function buildFloorSvg(
 
   // ⑦ 정북일조제한선 + 북측 기준경계선 + 치수선
   if (!is공동주택) {
-    // 기준 경계선 (인접대지경계선 or 도로 반대편)
+    // 기준경계선 좌표 (치수선 계산용, 시각 표시 없음)
     const [rx1, ry1] = toSvg(parcelBox.minX, northRef);
-    const [rx2,    ] = toSvg(parcelBox.maxX, northRef);
-    const refColor = northRoad ? '#ca8a04' : '#b45309';
-    const refLabel = northRoad ? '도로 반대편 경계선' : '인접대지경계선';
-    els += `<line x1="${rx1.toFixed(1)}" y1="${ry1.toFixed(1)}" x2="${rx2.toFixed(1)}" y2="${ry1.toFixed(1)}" stroke="${refColor}" stroke-width="2.2"/>`;
-    // 라벨 (흰 배경 포함)
-    const rxMid = ((rx1 + rx2) / 2).toFixed(0);
-    els += `<rect x="${(Number(rxMid)-48).toFixed(0)}" y="${(ry1-13).toFixed(0)}" width="96" height="10" fill="white" fill-opacity="0.85" rx="1"/>`;
-    els += `<text x="${rxMid}" y="${(ry1-5).toFixed(0)}" text-anchor="middle" font-size="6.5" fill="${refColor}">${refLabel}</text>`;
 
     // 정북일조제한선: 대지 경계선을 northSetbackM만큼 수직으로 이격한 형상
     // → insetPolygon의 북향(north-facing) 엣지를 사용해 경계선 형태를 따름
@@ -656,9 +648,8 @@ function buildFloorSvg(
   els += `<text x="${lcx.toFixed(0)}" y="${(lcy-7).toFixed(0)}" text-anchor="middle" font-size="18" font-weight="bold" fill="#1d4ed8">${floorIdx + 1}F</text>`;
   els += `<text x="${lcx.toFixed(0)}" y="${(lcy+12).toFixed(0)}" text-anchor="middle" font-size="12" fill="#1e3a5f">${area.toFixed(1)} ㎡</text>`;
 
-  // EL 라벨
-  const [elX, elY] = toSvg(0, bMaxY);
-  els += `<text x="${elX.toFixed(0)}" y="${(elY-4).toFixed(0)}" text-anchor="middle" font-size="8.5" fill="#64748b">EL+${floorBottomH.toFixed(1)}m</text>`;
+  // EL 라벨 — 좌하단 고정 표시
+  els += `<text x="8" y="${H - 14}" font-size="7.5" fill="#64748b">${floorIdx + 1}F = EL+${floorBottomH.toFixed(1)}m</text>`;
 
   // 범례 — 수평으로 제목 아래 배치
   {
@@ -667,7 +658,7 @@ function buildFloorSvg(
       { fill: '#eff6ff', stroke: '#93c5fd', dash: '3,2', label: '건축가능영역' },
       ...(!is공동주택 ? [{ fill: '#fef3c7', stroke: '#d97706', dash: '', label: '정북이격대' }] : []),
       ...(northAdj.some(a => a.jimok !== '도') ? [{ fill: '#f3f4f6', stroke: '#9ca3af', dash: '', label: '인접대지' }] : []),
-      ...(northRoad ? [{ fill: '#fef9c3', stroke: '#ca8a04', dash: '', label: '북측도로' }] : []),
+      ...(northRoad ? [{ fill: '#d1d5db', stroke: '#9ca3af', dash: '', label: '북측도로' }] : []),
     ];
     const itemWidths = legendItems.map(it => 10 + it.label.length * 5.5 + 8);
     const totalW = itemWidths.reduce((s, w) => s + w, 0);
