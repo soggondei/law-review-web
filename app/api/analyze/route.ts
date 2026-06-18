@@ -82,6 +82,12 @@ export async function POST(req: NextRequest) {
       용도: 용도||"", 용도지역: zoneName||"", 기타지구: land.기타지구,
       건폐율: effectiveRule?.건폐율, 용적률: effectiveRule?.용적률,
       최대건축면적: areas?.최대건축면적, 최대연면적,
+      시도: addrInfo.siNm || "",
+      조례확인: effectiveRule?.confidence === "confirmed",
+      densitySourceUrl: effectiveRule?.sourceUrl,
+      densitySourceName: effectiveRule?.sourceName,
+      densityConfidence: effectiveRule?.confidence,
+      densityNote: effectiveRule?.note,
     });
     const designItems = judgeDesignItems({ 연면적: 최대연면적, 층수: 추정층수, 용도: 용도||"", 대지면적: 대지면적_val, 지하층, 세대수, 기타지구: land.기타지구, 시도: addrInfo.siNm || "", 높이: bldgInfo?.높이 ?? undefined, 구조: 구조코드, 구조출처: bldgInfo?.구조 ? "대장확인" : "추정" });
     const permitItems = judgePermitItems({

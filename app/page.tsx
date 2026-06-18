@@ -430,6 +430,12 @@ export default function Home() {
       최대건축면적: areas?.최대건축면적, 최대연면적,
       세대수: apiResult.baseData?.세대수 ?? 0,
       북측이격: editParams.북측이격 || undefined,
+      시도: siNm,
+      조례확인: effectiveRule?.confidence === "confirmed",
+      densitySourceUrl: effectiveRule?.sourceUrl,
+      densitySourceName: effectiveRule?.sourceName,
+      densityConfidence: effectiveRule?.confidence,
+      densityNote: effectiveRule?.note,
       인접도로폭,
     });
     const 층수추정 = !editParams.층수직접입력;
@@ -1209,13 +1215,10 @@ export default function Home() {
                   </div>
                 </div>
                 {editParams.북측이격 > 0 && apiResult?.zoneName?.includes("주거") && (() => {
-                  const 지역 = apiResult.zoneName ?? "";
-                  const 배율 = 지역.includes("전용주거") || 지역.includes("1종일반") ? 2 : 4;
-                  const 가산 = 지역.includes("전용주거") || 지역.includes("1종일반") ? 0 : 지역.includes("2종일반") ? 4 : 8;
-                  const 허용 = Math.round((editParams.북측이격 * 배율 + 가산) * 10) / 10;
+                  const 허용 = editParams.북측이격 < 1.5 ? 0 : Math.round((10 + (editParams.북측이격 - 1.5) * 2) * 10) / 10;
                   return (
                     <div className="text-[10px] text-blue-600 text-right -mt-0.5">
-                      정북사선 허용높이 ≤ {허용}m
+                      정북일조 참고높이 ≤ {허용}m
                     </div>
                   );
                 })()}

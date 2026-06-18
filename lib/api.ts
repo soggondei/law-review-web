@@ -1,6 +1,7 @@
 /**
  * 외부 API 호출 모듈 (서버 전용 — Next.js API Route에서만 사용)
  */
+import zoneOrdinancesData from "@/lib/data/zone-ordinances.json";
 
 const JUSO_KEY    = process.env.JUSO_KEY!;
 const LURIS_KEY   = process.env.LURIS_KEY!;
@@ -185,8 +186,26 @@ export async function fetchZoneRates(zoneName: string) {
 }
 
 // ── 지자체별 조례 건폐율·용적률 ───────────────────────────────────────────────
-type ZoneRate = { 건폐율: number; 용적률: number };
+type ZoneRate = {
+  건폐율: number;
+  용적률: number;
+  근거?: string;
+  sourceName?: string;
+  sourceUrl?: string;
+  effectiveDate?: string;
+  confidence?: "confirmed" | "estimated" | "unverified" | "user_input";
+  note?: string;
+  region?: string;
+};
 type OrdinanceDB = Record<string, ZoneRate>;
+type ZoneOrdinance = {
+  sourceName: string;
+  sourceUrl?: string;
+  effectiveDate?: string;
+  confidence: "confirmed" | "estimated" | "unverified" | "user_input";
+  note?: string;
+  rates: OrdinanceDB;
+};
 
 const ORDINANCES: Record<string, OrdinanceDB> = {
   "서울특별시": {
@@ -287,8 +306,10 @@ const REGION_ALIASES: Record<string, string[]> = {
   "제주특별자치도": ["제주", "제주특별자치도"],
 };
 
+const ZONE_ORDINANCES = zoneOrdinancesData as Record<string, ZoneOrdinance>;
+
 function findOrdinanceRegion(siNm: string) {
-  return Object.keys(ORDINANCES).find(region =>
+  return Object.keys(ZONE_ORDINANCES).find(region =>
     REGION_ALIASES[region]?.some(alias => siNm.includes(alias))
   );
 }
@@ -296,11 +317,21 @@ function findOrdinanceRegion(siNm: string) {
 /** 시도명 + 용도지역으로 조례 건폐율·용적률 반환. 없으면 null */
 export function getOrdinanceRates(siNm: string, zoneName: string): ZoneRate | null {
   const key = findOrdinanceRegion(siNm);
-  const db = key ? ORDINANCES[key] : null;
-  return db?.[zoneName] ?? null;
+  const ordinance = key ? ZONE_ORDINANCES[key] : null;
+  const rate = ordinance?.rates?.[zoneName];
+  if (!key || !ordinance || !rate) return null;
+  return {
+    ...rate,
+    region: key,
+    sourceName: ordinance.sourceName,
+    sourceUrl: ordinance.sourceUrl,
+    effectiveDate: ordinance.effectiveDate,
+    confidence: ordinance.confidence,
+    note: ordinance.note,
+  };
 }
 
 // 하위 호환
 export function getSeoulOrdinance(zoneName: string) {
-  return ORDINANCES["서울특별시"]?.[zoneName] ?? null;
+  return getOrdinanceRates("서울특별시", zoneName);
 }

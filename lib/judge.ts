@@ -2,6 +2,9 @@
  * 5대 분류 판단 함수 (기존 fetch-laws.js에서 이식)
  */
 import parkingOrdinancesData from "@/lib/data/parking-ordinances.json";
+import setbackOrdinancesData from "@/lib/data/setback-ordinances.json";
+import { calcNorthDaylightReference } from "@/lib/daylight";
+import { classifyFireOccupancy } from "@/lib/fire-occupancy";
 
 // ── 주차장 기준 ───────────────────────────────────────────────────────────────
 export type Confidence = "confirmed" | "estimated" | "unverified" | "user_input";
@@ -70,6 +73,23 @@ function normalizeParkingOrdinances(db: Record<string, ParkingOrdinanceJson>): R
 }
 
 const PARKING_ORDINANCES = normalizeParkingOrdinances(parkingOrdinancesData as Record<string, ParkingOrdinanceJson>);
+
+type SetbackRule = { 건축선: number; 인접대지: number };
+type SetbackOrdinance = {
+  sourceName: string;
+  sourceUrl?: string;
+  effectiveDate?: string;
+  confidence: Confidence;
+  근거: string;
+  rules: Record<string, SetbackRule>;
+};
+type SetbackResult = SetbackRule & {
+  근거: string;
+  sourceName?: string;
+  sourceUrl?: string;
+  confidence: Confidence;
+};
+const SETBACK_ORDINANCES = setbackOrdinancesData as Record<string, SetbackOrdinance>;
 
 export type LawReviewItem = {
   ruleId?: string;
@@ -438,25 +458,31 @@ export const PERMITTED_USES: Record<string, { 허용: string[]; 불허: string[]
   },
 };
 
-// ── 이격거리 기준 (서울 조례) ─────────────────────────────────────────────────
-const SETBACK: Record<string, { 건축선: number; 인접대지: number; 근거: string }> = {
-  "단독주택":          { 건축선: 1.0, 인접대지: 0.5, 근거: "서울시 건축조례 별표4" },
-  "다가구주택":        { 건축선: 1.0, 인접대지: 0.5, 근거: "서울시 건축조례 별표4" },
-  "다세대주택":        { 건축선: 1.0, 인접대지: 0.5, 근거: "서울시 건축조례 별표4" },
-  "연립주택":          { 건축선: 1.0, 인접대지: 1.0, 근거: "서울시 건축조례 별표4" },
-  "아파트":            { 건축선: 3.0, 인접대지: 2.0, 근거: "서울시 건축조례 별표4" },
-  "제1종근린생활시설": { 건축선: 1.0, 인접대지: 0.5, 근거: "서울시 건축조례 별표4" },
-  "제2종근린생활시설": { 건축선: 1.0, 인접대지: 0.5, 근거: "서울시 건축조례 별표4" },
-  "판매시설":          { 건축선: 2.0, 인접대지: 1.0, 근거: "서울시 건축조례 별표4" },
-  "업무시설":          { 건축선: 2.0, 인접대지: 1.0, 근거: "서울시 건축조례 별표4" },
-  "숙박시설":          { 건축선: 2.0, 인접대지: 1.0, 근거: "서울시 건축조례 별표4" },
-};
-
-function getSetback(용도: string) {
-  for (const [key, val] of Object.entries(SETBACK)) {
-    if (용도.includes(key)) return val;
+// ── 이격거리 기준 ────────────────────────────────────────────────────────────
+function getSetback(용도: string, siNm = ""): SetbackResult {
+  const region = Object.keys(SETBACK_ORDINANCES).find((key) => siNm.includes(key.replace(/특별시|광역시|특별자치시|특별자치도/g, "")) || siNm.includes(key));
+  const ordinance = region ? SETBACK_ORDINANCES[region] : null;
+  if (ordinance) {
+    for (const [key, val] of Object.entries(ordinance.rules)) {
+      if (용도.includes(key)) {
+        return {
+          ...val,
+          근거: ordinance.근거,
+          sourceName: ordinance.sourceName,
+          sourceUrl: ordinance.sourceUrl,
+          confidence: ordinance.confidence,
+        };
+      }
+    }
   }
-  return { 건축선: 2.0, 인접대지: 1.0, 근거: "건축법 시행령 제80조의2" };
+  return {
+    건축선: 2.0,
+    인접대지: 1.0,
+    근거: region ? `${SETBACK_ORDINANCES[region].근거} 용도별 기준 미등록` : "지자체 건축 조례 대지안의 공지 기준 확인 필요",
+    sourceName: ordinance?.sourceName,
+    sourceUrl: ordinance?.sourceUrl,
+    confidence: "unverified",
+  };
 }
 
 // ── Section 2: 규모 ──────────────────────────────────────────────────────────
@@ -469,11 +495,17 @@ export function judgeScaleItems(params: {
   북측이격?: number;
   층수추정?: boolean;
   조례확인?: boolean;
+  시도?: string;
+  densitySourceUrl?: string;
+  densitySourceName?: string;
+  densityConfidence?: Confidence;
+  densityNote?: string;
   인접도로폭?: number;  // OSM에서 측정한 최근접 도로 폭(m)
 }) {
   const { 대지면적: 대지, 연면적: 면, 용도, 용도지역: 지역, 기타지구,
           건폐율, 용적률, 최대건축면적, 최대연면적, 세대수: 세대 = 0, 북측이격,
-          층수추정 = false, 조례확인 = true, 인접도로폭 } = params;
+          층수추정 = false, 조례확인 = true, 시도 = "", densitySourceUrl, densitySourceName,
+          densityConfidence, densityNote, 인접도로폭 } = params;
   const items: LawReviewItem[] = [];
   const hasSiteArea = isPositive(대지);
   const hasTotalArea = isPositive(면);
@@ -484,7 +516,12 @@ export function judgeScaleItems(params: {
       ? `법정 최대 건폐율 **${건폐율}%** 이하 → **최대 건축면적 ${최대건축면적}㎡**`
       : "용도지역, 조례 기준, 대지면적이 모두 확인되어야 최대 건축면적 산정 가능",
     해당여부: 건폐율 && hasSiteArea && isPositive(최대건축면적) ? "✅ 의무" : W("판단불가 — 용도지역/대지면적 확인 필요"),
-    confidence: 건폐율 && hasSiteArea && isPositive(최대건축면적) ? (조례확인 ? "confirmed" : "estimated") : undefined,
+    confidence: 건폐율 && hasSiteArea && isPositive(최대건축면적) ? (densityConfidence ?? (조례확인 ? "confirmed" : "estimated")) : undefined,
+    sourceUrl: densitySourceUrl,
+    sourceName: densitySourceName,
+    scope:"ordinance",
+    requiresInput: densityConfidence === "unverified" ? ["지자체 도시계획 조례", "별표 수치", "기초지자체 위임 여부"] : undefined,
+    설계기준: densityNote ?? undefined,
   });
   items.push({
     category:"나", 항목:"용적률", 법령:"국토계획법 시행령 제85조, 지자체 조례",
@@ -492,14 +529,24 @@ export function judgeScaleItems(params: {
       ? `법정 최대 용적률 **${용적률}%** 이하 → **최대 연면적 ${최대연면적}㎡**`
       : "용도지역, 조례 기준, 대지면적이 모두 확인되어야 최대 연면적 산정 가능",
     해당여부: 용적률 && hasSiteArea && isPositive(최대연면적) ? "✅ 의무" : W("판단불가 — 용도지역/대지면적 확인 필요"),
-    confidence: 용적률 && hasSiteArea && isPositive(최대연면적) ? (조례확인 ? "confirmed" : "estimated") : undefined,
+    confidence: 용적률 && hasSiteArea && isPositive(최대연면적) ? (densityConfidence ?? (조례확인 ? "confirmed" : "estimated")) : undefined,
+    sourceUrl: densitySourceUrl,
+    sourceName: densitySourceName,
+    scope:"ordinance",
+    requiresInput: densityConfidence === "unverified" ? ["지자체 도시계획 조례", "별표 수치", "기초지자체 위임 여부"] : undefined,
+    설계기준: densityNote ?? undefined,
   });
 
-  const sb = getSetback(용도);
+  const sb = getSetback(용도, 시도);
   items.push({
-    category:"다", 항목:"대지안의 공지 (이격거리)", 법령:"건축법 제58조, 서울시 건축조례 별표4",
+    category:"다", 항목:"대지안의 공지 (이격거리)", 법령:"건축법 제58조, 지자체 건축 조례",
     내용: `건축선으로부터 **${sb.건축선}m** 이상, 인접대지 경계선으로부터 **${sb.인접대지}m** 이상`,
     해당여부: "✅ 의무", 설계기준: `건축선 ${sb.건축선}m / 인접대지 ${sb.인접대지}m`,
+    confidence: sb.confidence,
+    scope:"ordinance",
+    sourceUrl: sb.sourceUrl,
+    sourceName: sb.sourceName,
+    requiresInput: sb.confidence === "unverified" ? ["지자체 건축 조례 대지안의 공지 별표", "용도별 이격거리", "인접대지/건축선 구분"] : undefined,
   });
   items.push({
     category:"라", 항목:"건축선 지정", 법령:"건축법 제47조",
@@ -526,29 +573,19 @@ export function judgeScaleItems(params: {
     해당여부: !hasTotalArea ? W("판단불가 — 연면적 확인 필요") : 공개공지 ? `✅ 공개공지 최소 ${Math.ceil(대지*0.05)}㎡` : N,
   });
 
-  const 주거지역 = 지역.includes("주거");
-  let 일조내용 = 주거지역
-    ? "전용·일반 주거지역 정북방향 이격 기준 (§86): **10m 이하 구간**과 **10m 초과 구간**을 나누어 검토. 도로·공원·하천 접면 예외는 별도 확인"
-    : "채광창 방향 기준 사선제한. 가로구역별 최고높이 우선";
-  if (주거지역 && 북측이격 && 북측이격 > 0) {
-    const 참고높이 = 북측이격 < 1.5 ? 0 : Math.round((10 + (북측이격 - 1.5) * 2) * 10) / 10;
-    const 구간 = 북측이격 < 1.5 ? "10m 이하 구간 최소 이격(1.5m) 미달" : "10m 초과분 1/2 이격 개략 역산";
-    일조내용 = `정북 방향 인접 경계까지 **${북측이격}m** (${구간}) → 참고 허용 높이 **${참고높이}m**. 현재 값은 개략치이며 도로·공원·하천 예외와 지자체 조례 확인 필요`;
-  }
+  const daylight = calcNorthDaylightReference({ zoneName: 지역, northSetback: 북측이격 });
   items.push({
     ruleId:"north-daylight-reference",
     category:"사", 항목:"일조제한", 법령:"건축법 제61조, 시행령 제86조",
-    내용: 일조내용,
-    해당여부: 주거지역 && 북측이격 && 북측이격 > 0
+    내용: daylight.summary,
+    해당여부: daylight.applies && 북측이격 && 북측이격 > 0
       ? `⚠️ 정북 ${북측이격}m 기준 참고 높이 — 관할 구청 확인 필요`
       : "✅ 의무",
-    설계기준: 주거지역 && 북측이격 && 북측이격 > 0
-      ? `10m 이하 구간: 1.5m 이격. 10m 초과 구간: 초과분 1/2 이격 개략 반영. 전용주거/1·2종 일반주거와 접면 예외는 조례·도면으로 재확인`
-      : undefined,
-    confidence: 주거지역 && 북측이격 && 북측이격 > 0 ? "estimated" : undefined,
+    설계기준: daylight.designStandard,
+    confidence: daylight.confidence,
     scope:"ordinance",
-    sourceUrl:"https://www.law.go.kr/법령/건축법시행령/제86조",
-    requiresInput:["정북 방향 인접대지 경계선", "해당 용도지역 세부 분류", "도로·공원·하천 접면 예외", "지자체 조례"],
+    sourceUrl: daylight.sourceUrl,
+    requiresInput: daylight.requiresInput,
   });
 
   const 대로접속 = hasTotalArea && 면 >= 2000;
@@ -707,25 +744,6 @@ const 기본층고: Record<string, number> = {
 function 추정높이(용도: string, 층수: number): number {
   const 층고 = Object.entries(기본층고).find(([k]) => 용도.includes(k))?.[1] ?? 3.5;
   return 층수 * 층고;
-}
-
-type FireOccupancyProfile = {
-  matchedUses: string[];
-  requiresDetailedUse: boolean;
-  note: string;
-};
-
-function classifyFireOccupancy(용도: string, 복합용도: boolean): FireOccupancyProfile {
-  const candidates = ["공동주택", "근린생활", "판매", "업무", "의료", "문화집회", "숙박", "노유자", "수련", "창고", "공장", "교육연구"];
-  const matchedUses = candidates.filter((candidate) => 용도.includes(candidate));
-  const genericUse = matchedUses.length === 0 || 용도.includes("근린생활") || 용도.includes("복합");
-  return {
-    matchedUses,
-    requiresDetailedUse: 복합용도 || genericUse,
-    note: matchedUses.length
-      ? `소방 용도 후보: ${matchedUses.join(", ")}`
-      : "소방 특정소방대상물 세부 용도 미분류",
-  };
 }
 
 export function judgeDesignItems(params: {

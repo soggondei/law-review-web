@@ -3,11 +3,19 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const judge = readFileSync(resolve(root, "lib/judge.ts"), "utf8");
+const api = readFileSync(resolve(root, "lib/api.ts"), "utf8");
+const daylight = readFileSync(resolve(root, "lib/daylight.ts"), "utf8");
+const zoneOrdinances = readFileSync(resolve(root, "lib/data/zone-ordinances.json"), "utf8");
+const setbackOrdinances = readFileSync(resolve(root, "lib/data/setback-ordinances.json"), "utf8");
 
 const failures = [];
 
 function requireText(text, message) {
   if (!judge.includes(text)) failures.push(message);
+}
+
+function requireIn(source, text, message) {
+  if (!source.includes(text)) failures.push(message);
 }
 
 function forbidText(text, message) {
@@ -21,9 +29,17 @@ requireText("auditLawReviewItems", "법규 항목 감사 함수 누락");
 requireText("finalizeReviewItems(items)", "법규 항목 메타데이터 finalize 흐름 누락");
 requireText('export type ReviewIntent = "compliance" | "design_reference" | "requires_verification"', "검토 의도 타입 누락");
 requireText('ruleId:"north-daylight-reference"', "정북일조 참고값 ruleId 누락");
-requireText("10m 이하 구간", "정북일조 10m 이하 구간 기준 누락");
+requireIn(daylight, "10m 이하 구간", "정북일조 10m 이하 구간 기준 누락");
 requireText('reviewIntent:"design_reference"', "설계 참고 항목 메타데이터 누락");
 requireText("classifyFireOccupancy", "소방 특정소방대상물 분류 보조 함수 누락");
+requireText("calcNorthDaylightReference", "정북일조 계산 모듈 연결 누락");
+requireText("SETBACK_ORDINANCES", "대지안의 공지 조례 DB 연결 누락");
+requireIn(api, "zone-ordinances.json", "건폐율·용적률 조례 JSON 연결 누락");
+requireIn(zoneOrdinances, "서울특별시 도시계획 조례", "서울 도시계획 조례 근거 누락");
+requireIn(zoneOrdinances, "\"confidence\": \"unverified\"", "미검증 조례 confidence 누락");
+requireIn(setbackOrdinances, "서울특별시 건축 조례 별표4", "대지안의 공지 서울 조례 근거 누락");
+requireIn(daylight, "10m 이하 구간", "정북일조 10m 이하 구간 모듈 기준 누락");
+requireIn(daylight, "northSetback < 1.5", "정북일조 1.5m 최소 이격 검토 누락");
 
 forbidText('항목:"대지안의 피난통로", 법령:"건축법 시행령 제90조의2"', "대지안의 피난통로가 제90조의2에 다시 연결됨");
 forbidText('항목:"대지안의 피난통로", 법령:"건축법 시행령 제90조의2",\n    내용:"막힌 복도', "대지안의 피난통로와 막힌 복도 기준이 다시 혼재됨");
