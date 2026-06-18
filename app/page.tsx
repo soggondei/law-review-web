@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
-import { judgeScaleItems, judgeDesignItems, judgePermitItems, calcAreas, calcParking, type Confidence, type LegalScope } from "@/lib/judge";
+import { judgeScaleItems, judgeDesignItems, judgePermitItems, calcAreas, calcParking, type Confidence, type LegalScope, type ReviewIntent } from "@/lib/judge";
 import { generateSchedule } from "@/lib/schedule";
 import type { PdfExtractResult } from "@/app/api/pdf-extract/route";
 
@@ -35,6 +35,7 @@ type Item = {
   설계기준?: string | null;
   confidence?: Confidence;
   scope?: LegalScope;
+  reviewIntent?: ReviewIntent;
   sourceUrl?: string;
   sourceName?: string;
   requiresInput?: string[];
@@ -219,6 +220,7 @@ function ItemTable({ items }: { items: Item[] }) {
                 <span className={`inline-block px-2 py-1 rounded text-[11px] font-medium ${badgeColor(item.해당여부)}`}>{item.해당여부}</span>
                 {item.confidence === "estimated" && <span className="block mt-1 text-[10px] text-amber-600 bg-amber-50 rounded px-1.5 py-0.5">🟡 추정값</span>}
                 {item.confidence === "unverified" && <span className="block mt-1 text-[10px] text-red-500 bg-red-50 rounded px-1.5 py-0.5">🔴 미확인</span>}
+                {item.reviewIntent === "design_reference" && <span className="block mt-1 text-[10px] text-blue-700 bg-blue-50 rounded px-1.5 py-0.5">설계 참고</span>}
                 {item.confidence === "confirmed" && item.scope === "parking" && <span className="block mt-1 text-[10px] text-green-700 bg-green-50 rounded px-1.5 py-0.5">확인 조례</span>}
               </td>
             </tr>

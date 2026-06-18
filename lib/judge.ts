@@ -6,6 +6,7 @@ import parkingOrdinancesData from "@/lib/data/parking-ordinances.json";
 // ── 주차장 기준 ───────────────────────────────────────────────────────────────
 export type Confidence = "confirmed" | "estimated" | "unverified" | "user_input";
 export type LegalScope = "site" | "building_interior" | "fire" | "accessibility" | "ordinance" | "parking" | "permit" | "structure" | "environment" | "equipment" | "other";
+export type ReviewIntent = "compliance" | "design_reference" | "requires_verification";
 type ParkingRounding = "ceil" | "half-up";
 type ParkingRuleMeta = { sourceUrl?: string; effectiveDate?: string; confidence?: Confidence };
 type ParkingAreaRule = { per: number; 근거: string; note?: string; rounding?: ParkingRounding } & ParkingRuleMeta;
@@ -80,6 +81,7 @@ export type LawReviewItem = {
   설계기준?: string | null;
   confidence?: Confidence;
   scope?: LegalScope;
+  reviewIntent?: ReviewIntent;
   sourceUrl?: string;
   sourceName?: string;
   requiresInput?: string[];
@@ -95,6 +97,7 @@ export type PermitReviewItem = {
   비고?: string | null;
   confidence?: Confidence;
   scope?: LegalScope;
+  reviewIntent?: ReviewIntent;
   sourceUrl?: string;
   sourceName?: string;
   requiresInput?: string[];
@@ -133,6 +136,14 @@ function sourceUrlForLaw(law: string): string | undefined {
   return `https://www.law.go.kr/법령/${encodeURIComponent(compact)}`;
 }
 
+function inferReviewIntent(item: AuditableReviewItem): ReviewIntent {
+  if (item.reviewIntent) return item.reviewIntent;
+  const note = "비고" in item ? item.비고 : "설계기준" in item ? item.설계기준 : null;
+  const text = `${item.해당여부} ${item.내용} ${note ?? ""}`;
+  if (text.includes("판단불가") || text.includes("확인 필요") || item.requiresInput?.length) return "requires_verification";
+  return "compliance";
+}
+
 export function auditLawReviewItems(items: AuditableReviewItem[]): string[] {
   const warnings: string[] = [];
   for (const item of items) {
@@ -143,7 +154,7 @@ export function auditLawReviewItems(items: AuditableReviewItem[]): string[] {
     if (!item.confidence) warnings.push(`${label}: confidence 누락`);
     if (item.confidence === "confirmed" && !item.sourceUrl) warnings.push(`${label}: confirmed 항목 sourceUrl 누락`);
     if (/대지/.test(item.항목) && /복도/.test(item.내용)) warnings.push(`${label}: 대지 항목에 복도 기준 혼재`);
-    if (item.requiresInput?.length && item.해당여부.startsWith("✅")) {
+    if (item.requiresInput?.length && item.해당여부.startsWith("✅") && item.reviewIntent !== "design_reference") {
       warnings.push(`${label}: 필수 입력값(${item.requiresInput.join(", ")}) 필요 항목이 확정 판정으로 표시됨`);
     }
     if (/조례/.test(item.법령) && item.confidence === "confirmed" && !item.sourceUrl) {
@@ -152,7 +163,7 @@ export function auditLawReviewItems(items: AuditableReviewItem[]): string[] {
     if (/대지안의 피난통로/.test(item.항목) && /제90조의2|막힌 복도/.test(`${item.법령} ${item.내용}`)) {
       warnings.push(`${label}: 대지 피난통로와 막힌 복도/제90조의2 혼재 의심`);
     }
-    if (/막힌 복도|복도너비|계단 치수|난간/.test(text) && item.해당여부.startsWith("✅")) {
+    if (/막힌 복도|복도너비|계단 치수|난간/.test(text) && item.해당여부.startsWith("✅") && item.reviewIntent !== "design_reference") {
       warnings.push(`${label}: 도면 치수 확인 없이 확정 판정`);
     }
   }
@@ -164,6 +175,7 @@ function finalizeReviewItems<T extends AuditableReviewItem>(items: T[]): (T & { 
     ...item,
     confidence: inferConfidence(item),
     scope: item.scope ?? inferScope(item),
+    reviewIntent: inferReviewIntent(item),
     sourceUrl: item.sourceUrl ?? sourceUrlForLaw(item.법령),
     sourceName: item.sourceName ?? item.법령,
   }));
@@ -515,26 +527,28 @@ export function judgeScaleItems(params: {
   });
 
   const 주거지역 = 지역.includes("주거");
-  // 건축법 시행령 §86: 10m 이하 → 1.5m 이격, 10m 초과 → 높이/2 이격
-  // 역산: max(10, 이격 × 2). 이격 < 5m → 최대 10m(수직 허용), ≥ 5m → 이격 × 2
   let 일조내용 = 주거지역
-    ? "전용·일반 주거지역 정북방향 이격 기준 (§86): **10m 이하** → 1.5m 이상, **10m 초과** → 해당 높이의 1/2 이상"
+    ? "전용·일반 주거지역 정북방향 이격 기준 (§86): **10m 이하 구간**과 **10m 초과 구간**을 나누어 검토. 도로·공원·하천 접면 예외는 별도 확인"
     : "채광창 방향 기준 사선제한. 가로구역별 최고높이 우선";
   if (주거지역 && 북측이격 && 북측이격 > 0) {
-    const 최대허용높이 = Math.round(Math.max(10, 북측이격 * 2) * 10) / 10;
-    const 구간 = 북측이격 < 1.5 ? "최소 이격(1.5m) 미달" : 북측이격 < 5 ? "수직 허용 구간 (최대 10m)" : "사선 적용 구간";
-    일조내용 = `정북 방향 인접 경계까지 **${북측이격}m** (${구간}) → 최대 허용 높이 **${최대허용높이}m** (건축법 시행령 §86)`;
+    const 참고높이 = 북측이격 < 1.5 ? 0 : Math.round((10 + (북측이격 - 1.5) * 2) * 10) / 10;
+    const 구간 = 북측이격 < 1.5 ? "10m 이하 구간 최소 이격(1.5m) 미달" : "10m 초과분 1/2 이격 개략 역산";
+    일조내용 = `정북 방향 인접 경계까지 **${북측이격}m** (${구간}) → 참고 허용 높이 **${참고높이}m**. 현재 값은 개략치이며 도로·공원·하천 예외와 지자체 조례 확인 필요`;
   }
   items.push({
+    ruleId:"north-daylight-reference",
     category:"사", 항목:"일조제한", 법령:"건축법 제61조, 시행령 제86조",
     내용: 일조내용,
     해당여부: 주거지역 && 북측이격 && 북측이격 > 0
-      ? `✅ 정북 ${북측이격}m 기준 최대 허용 높이 산정 완료`
+      ? `⚠️ 정북 ${북측이격}m 기준 참고 높이 — 관할 구청 확인 필요`
       : "✅ 의무",
     설계기준: 주거지역 && 북측이격 && 북측이격 > 0
-      ? `10m 이하: 1.5m 이격(수직). 10m 초과: 높이/2 이격. 도로·공원 인접 시 반대편 경계까지 합산 가능`
+      ? `10m 이하 구간: 1.5m 이격. 10m 초과 구간: 초과분 1/2 이격 개략 반영. 전용주거/1·2종 일반주거와 접면 예외는 조례·도면으로 재확인`
       : undefined,
     confidence: 주거지역 && 북측이격 && 북측이격 > 0 ? "estimated" : undefined,
+    scope:"ordinance",
+    sourceUrl:"https://www.law.go.kr/법령/건축법시행령/제86조",
+    requiresInput:["정북 방향 인접대지 경계선", "해당 용도지역 세부 분류", "도로·공원·하천 접면 예외", "지자체 조례"],
   });
 
   const 대로접속 = hasTotalArea && 면 >= 2000;
@@ -695,6 +709,25 @@ function 추정높이(용도: string, 층수: number): number {
   return 층수 * 층고;
 }
 
+type FireOccupancyProfile = {
+  matchedUses: string[];
+  requiresDetailedUse: boolean;
+  note: string;
+};
+
+function classifyFireOccupancy(용도: string, 복합용도: boolean): FireOccupancyProfile {
+  const candidates = ["공동주택", "근린생활", "판매", "업무", "의료", "문화집회", "숙박", "노유자", "수련", "창고", "공장", "교육연구"];
+  const matchedUses = candidates.filter((candidate) => 용도.includes(candidate));
+  const genericUse = matchedUses.length === 0 || 용도.includes("근린생활") || 용도.includes("복합");
+  return {
+    matchedUses,
+    requiresDetailedUse: 복합용도 || genericUse,
+    note: matchedUses.length
+      ? `소방 용도 후보: ${matchedUses.join(", ")}`
+      : "소방 특정소방대상물 세부 용도 미분류",
+  };
+}
+
 export function judgeDesignItems(params: {
   연면적: number; 층수: number; 용도: string; 대지면적: number;
   지하층?: number; 세대수?: number; 기타지구?: string[];
@@ -726,6 +759,7 @@ export function judgeDesignItems(params: {
   const parkingCount = typeof pk?.대수 === "number" ? pk.대수 : null;
   const 장애인수 = typeof pk?.장애인대수 === "number" ? pk.장애인대수 : 0;
   const 복합용도 = 용도.includes(" + ");
+  const fireProfile = classifyFireOccupancy(용도, 복합용도);
   const parkingBadge = pk?.ordinanceStatus === "confirmed"
     ? `${pk.ordinanceRegion} 조례 적용`
     : pk?.ordinanceStatus === "missing"
@@ -808,9 +842,13 @@ export function judgeDesignItems(params: {
   ].filter((v): v is string => Boolean(v));
   if (스프링클러사유.length > 0 || (!hasTotalArea && (지하층 >= 1 || 복합용도))) {
     items.push({ category:"사", 항목:"스프링클러", 법령:"소방시설법 시행령 별표4",
-      내용:"11층 이상, 공동주택 6층 이상, 노유자시설, 숙박형 수련시설, 지하층 포함 1,000㎡ 이상 판매·업무·의료·문화집회 용도, 지하층 포함 복합건축물 5,000㎡ 이상 등: 스프링클러 설치 검토",
+      내용:`11층 이상, 공동주택 6층 이상, 노유자시설, 숙박형 수련시설, 지하층 포함 1,000㎡ 이상 판매·업무·의료·문화집회 용도, 지하층 포함 복합건축물 5,000㎡ 이상 등: 스프링클러 설치 검토. ${fireProfile.note}`,
       해당여부: 스프링클러사유.length > 0 ? Y(`스프링클러 설치: ${스프링클러사유.join(", ")}`) : W("판단불가 — 지하층/연면적/복합용도 기준 확인 필요"),
-      설계기준:"설치 시 방화구획 3배 완화 가능. 특정소방대상물 세부 용도와 층별 바닥면적은 소방 협의로 재확인", confidence: cf층수 });
+      설계기준:"설치 시 방화구획 3배 완화 가능. 특정소방대상물 세부 용도와 층별 바닥면적은 소방 협의로 재확인",
+      confidence: fireProfile.requiresDetailedUse ? "estimated" : cf층수,
+      scope:"fire",
+      sourceUrl:"https://www.law.go.kr/법령/소방시설설치및관리에관한법률시행령",
+      requiresInput: fireProfile.requiresDetailedUse ? ["특정소방대상물 세부 용도", "층별 바닥면적", "무창층 여부", "지하층 용도"] : undefined });
   }
 
   items.push({ category:"아", 항목:"승용 승강기", 법령:"건축법 시행령 제89조",
@@ -965,13 +1003,17 @@ export function judgeDesignItems(params: {
     items.push({ category:"소방/환경", 항목:"거실 채광창", 법령:"건축법 제49조, 시행령 제51조",
       내용:"주거·교육·노유자 시설 거실: 채광창 유효면적 **바닥면적 1/10 이상** (북측 창호 제외)",
       해당여부: Y("채광창 바닥면적 × 1/10 이상"),
-      설계기준:"유효채광면적 = 창호 유효면적 × 보정계수. 북향·차광구조물 제외" });
+      설계기준:"유효채광면적 = 창호 유효면적 × 보정계수. 북향·차광구조물 제외",
+      reviewIntent:"design_reference",
+      requiresInput:["실별 바닥면적", "창호 유효면적", "창호 방향 및 차광 조건"] });
 
   const 기계환기의무 = 공동주택 && 세대수 >= 30;
   items.push({ category:"소방/환경", 항목:"거실 환기", 법령:"건축법 제49조, 시행령 제51조",
     내용:`거실 환기창 **바닥면적 1/20 이상** 또는 기계환기설비${기계환기의무 ? ". 30세대↑ 공동주택: **기계환기설비 의무**" : ""}`,
     해당여부: 기계환기의무 ? Y("기계환기설비 의무 (0.5회/h↑)") : Y("환기창 1/20 이상 또는 기계환기설비"),
-    설계기준:"자연환기 개구부 하단 0.5m↑. 기계환기: 시간당 환기횟수 0.5회↑" });
+    설계기준:"자연환기 개구부 하단 0.5m↑. 기계환기: 시간당 환기횟수 0.5회↑",
+    reviewIntent:"design_reference",
+    requiresInput:["실별 바닥면적", "환기창 유효면적", "기계환기 계획"] });
 
   const 자탐해당 = 면 >= 400 || 층 >= 11 || (공동주택 && 세대수 >= 16) || 지하층 >= 1;
   items.push({ category:"소방", 항목:"자동화재탐지설비", 법령:"소방시설법 시행령 별표4",
@@ -1069,17 +1111,23 @@ export function judgeDesignItems(params: {
   items.push({ category:"건축기준", 항목:"계단 치수 (단 높이·단 너비)", 법령:"건축법 시행령 제48조",
     내용:"계단 단 높이 **18cm↓**, 단 너비 **26cm↑**. 주택: 단 높이 20cm↓, 단 너비 24cm↑",
     해당여부: Y("단 높이 18cm↓·단 너비 26cm↑ (주택 20/24cm)"),
-    설계기준:"계단 폭: 양측거실 1.2m↑, 한측거실 0.9m↑. 미끄럼방지 마감 필수" });
+    설계기준:"계단 폭: 양측거실 1.2m↑, 한측거실 0.9m↑. 미끄럼방지 마감 필수",
+    reviewIntent:"design_reference",
+    requiresInput:["계단 유효폭", "단 높이", "단 너비", "용도별 계단 구분"] });
 
   items.push({ category:"건축기준", 항목:"계단·복도 난간 높이", 법령:"건축법 시행령 제48조",
     내용:"계단·복도 난간 높이 **120cm↑** (외부계단·옥외 150cm↑). 세로살 간격 **10cm↓**",
     해당여부: Y("난간 120cm↑·세로살 10cm↓ (외부 150cm↑)"),
-    설계기준:"손잡이 지름 3~4.5cm, 벽에서 5cm↑ 이격. 미끄럼방지 마감" });
+    설계기준:"손잡이 지름 3~4.5cm, 벽에서 5cm↑ 이격. 미끄럼방지 마감",
+    reviewIntent:"design_reference",
+    requiresInput:["난간 설치 위치", "난간 높이", "난간살 간격", "외부/내부 구분"] });
 
   if (층 >= 2) items.push({ category:"건축기준", 항목:"발코니·옥상 난간 높이", 법령:"건축법 시행령 제40조",
     내용:"2층↑ 발코니·테라스·옥상 개방부: 난간 높이 **120cm↑** (어린이시설 150cm↑)",
     해당여부: Y("발코니·옥상 난간 120cm↑"),
-    설계기준:"세로형 난간살: 간격 10cm↓. 수평 또는 오르기 쉬운 구조 금지" });
+    설계기준:"세로형 난간살: 간격 10cm↓. 수평 또는 오르기 쉬운 구조 금지",
+    reviewIntent:"design_reference",
+    requiresInput:["개방부 위치", "난간 높이", "어린이 이용시설 여부"] });
 
   const 화장실의무용도 = ["판매","의료","교육연구","문화집회","운수","업무","숙박","노유자"].some(u => 용도.includes(u));
   if (화장실의무용도 && 면 >= 500) items.push({ category:"건축기준", 항목:"위생기구 설치 기준", 법령:"건축법 시행령 제28조, 공중화장실법",
@@ -1096,13 +1144,17 @@ export function judgeDesignItems(params: {
   if (지하층 >= 1 || (pk?.대수 ?? 0) >= 1) items.push({ category:"주차", 항목:"주차경사로 기준", 법령:"주차장법 시행규칙 제6조",
     내용:"주차경사로: 직선 **17% 이하**, 곡선 **14% 이하**. 노면 미끄럼방지 의무",
     해당여부: Y("경사도 17%↓(직선)·14%↓(곡선), 미끄럼방지 마감"),
-    설계기준:"폭: 3.5m↑(일방향)/6.0m↑(양방향). 높이 2.1m↑. 경사도 표지판 설치" });
+    설계기준:"폭: 3.5m↑(일방향)/6.0m↑(양방향). 높이 2.1m↑. 경사도 표지판 설치",
+    reviewIntent:"design_reference",
+    requiresInput:["경사로 직선/곡선 구분", "경사도", "유효폭", "층고 및 유효높이"] });
 
   const 경사로대상 = 층 >= 2 || 지하층 >= 1 || 화장실의무용도;
   if (경사로대상) items.push({ category:"장애인", 항목:"장애인 경사로", 법령:"장애인편의법 제7조, 시행규칙 별표1",
     내용:"턱·계단 있는 출입구: 기울기 **1/12 이하** (4.76°↓), 유효폭 **120cm↑**",
     해당여부: Y("장애인 경사로 기울기 1/12↓·유효폭 120cm↑"),
-    설계기준:"높이 75cm↑마다 수평참(150cm↑). 경사면 미끄럼방지. 손잡이 양측" });
+    설계기준:"높이 75cm↑마다 수평참(150cm↑). 경사면 미끄럼방지. 손잡이 양측",
+    reviewIntent:"design_reference",
+    requiresInput:["출입구 단차", "경사로 길이", "유효폭", "수평참 위치"] });
 
   items.push({ category:"설비", 항목:"오수처리시설 (하수 연결)", 법령:"하수도법 제34조",
     내용:"공공하수도 연결 가능 지역: 하수관 연결 의무. 미연결 지역: 개인하수처리시설(정화조) 설치",
