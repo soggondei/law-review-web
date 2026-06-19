@@ -267,11 +267,19 @@ async function fetchAdjacentParcels(lat: number, lng: number): Promise<AdjacentP
     });
     if (!res.ok) return [];
     const data = await res.json();
-    return parseVworldFeatures(data, toLocal).map(({ polygon, props }) => ({
-      polygon,
-      jimok: props.JIMOK ?? props.jimok ?? '',
-      jibun: props.JIBUN ?? props.jibun ?? '',
-    }));
+    return parseVworldFeatures(data, toLocal).map(({ polygon, props }) => {
+      // LP_PA_CBND_BUBUN에는 JIMOK 필드 없음 — bonbun/bubun 말미 한글이 지목코드
+      // e.g. bonbun="225도" → "도", bubun="57도" → "도"
+      const bonbun = props.bonbun ?? props.BONBUN ?? '';
+      const bubun  = props.bubun  ?? props.BUBUN  ?? '';
+      const jimokSrc = bubun || bonbun;
+      const jimokMatch = jimokSrc.match(/([가-힣]+)$/);
+      return {
+        polygon,
+        jimok: props.JIMOK ?? props.jimok ?? (jimokMatch ? jimokMatch[1] : ''),
+        jibun: props.JIBUN ?? props.jibun ?? props.jibun ?? '',
+      };
+    });
   } catch {
     return [];
   }
@@ -773,18 +781,6 @@ function buildFloorSvg(
   // 푸터
   els += `<text x="185" y="${H-14}" text-anchor="middle" font-size="8" fill="#9ca3af">대지안의 공지 ${BASE_SB}m · 건폐율 ${input.건폐율}% · 용적률 ${input.용적률}%</text>`;
   els += `<text x="185" y="${H-3}" text-anchor="middle" font-size="8" fill="#9ca3af">층고 ${층고.toFixed(1)}m · 총높이 ${(input.층수*층고).toFixed(1)}m</text>`;
-
-  // ── [DEBUG] northRef 진단 (임시) — 확인 후 삭제
-  if (floorIdx === 0) {
-    const dbgLines = [
-      `northRef=${northRef.toFixed(2)}  parcelMaxY=${parcelBox.maxY.toFixed(2)}  roadOffset=${roadOffset.toFixed(2)}m`,
-      `northAdj=${northAdj.length}  northRoad=${northRoad ? northRoad.jimok || 'jimok없음' : 'none'}  boundSegs=${northBoundarySegs.length}`,
-      `northAdj jimoks: ${northAdj.slice(0,5).map(a=>a.jimok||'?').join(', ')}`,
-    ];
-    dbgLines.forEach((line, i) => {
-      els += `<text x="4" y="${(H - 50 + i * 11).toFixed(0)}" font-size="7" fill="#ef4444" font-weight="bold">[DBG] ${line}</text>`;
-    });
-  }
 
   return {
     svg: `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="auto" viewBox="0 0 ${W} ${H}" font-family="sans-serif">
