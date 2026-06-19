@@ -268,16 +268,19 @@ async function fetchAdjacentParcels(lat: number, lng: number): Promise<AdjacentP
     if (!res.ok) return [];
     const data = await res.json();
     return parseVworldFeatures(data, toLocal).map(({ polygon, props }) => {
-      // LP_PA_CBND_BUBUN에는 JIMOK 필드 없음 — bonbun/bubun 말미 한글이 지목코드
-      // e.g. bonbun="225도" → "도", bubun="57도" → "도"
-      const bonbun = props.bonbun ?? props.BONBUN ?? '';
+      // LP_PA_CBND_BUBUN에는 JIMOK 필드 없음
+      // jibun이 가장 신뢰도 높음: "803대"→"대", "707도"→"도", "526-2대"→"대"
+      // bonbun은 단독 필지에서 "707도"처럼 jimok 포함하기도 하나,
+      // "803"처럼 jimok 없는 경우도 있어서 jibun을 우선
+      const jibun  = props.jibun  ?? props.JIBUN  ?? '';
       const bubun  = props.bubun  ?? props.BUBUN  ?? '';
-      const jimokSrc = bubun || bonbun;
+      const bonbun = props.bonbun ?? props.BONBUN ?? '';
+      const jimokSrc = jibun || bubun || bonbun;
       const jimokMatch = jimokSrc.match(/([가-힣]+)$/);
       return {
         polygon,
         jimok: props.JIMOK ?? props.jimok ?? (jimokMatch ? jimokMatch[1] : ''),
-        jibun: props.JIBUN ?? props.jibun ?? props.jibun ?? '',
+        jibun,
       };
     });
   } catch {
