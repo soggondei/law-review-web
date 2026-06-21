@@ -189,6 +189,7 @@ export default function Home() {
       층수,
       용도: apiResult.용도 || "단독주택",
       최대연면적: Math.round(rule.용적률 * 대지면적 / 100),
+      용도지역: apiResult.baseData?.zoneName ?? "",
       ...(apiResult.coords?.lat ? { lat: apiResult.coords.lat, lng: apiResult.coords.lng } : {}),
     };
     const ctrl = new AbortController();

@@ -15,6 +15,7 @@ interface LayoutInput {
   층수: number;
   용도: string;
   최대연면적: number;
+  용도지역?: string;  // 정북일조 적용 여부 판단용
   대지가로?: number;
   대지세로?: number;
   lat?: number;
@@ -194,12 +195,15 @@ function polyIntervalsAtY(poly: [number, number][], y: number): [number, number]
 }
 
 // ── 정북일조 이격거리 계산 (건축법 제61조·시행령 제86조 제1항) ─────────────────
-// 비공동주택: 높이 10m 이하 → 1.5m, 10m 초과 → 높이/2
+// 적용대상: 전용주거지역·일반주거지역만. 준주거·상업·공업 등 미적용.
+// 비공동주택: 높이 9m 이하 → 1.5m, 9m 초과 → 높이/2 (§86①의 기준값)
 // 공동주택(아파트·연립·다세대·기숙사): 채광기준(제61조제2항) 별도 적용 → 0 반환
-function calcNorthSetback(floorTopH: number, 용도: string): number {
+function calcNorthSetback(floorTopH: number, 용도: string, 용도지역?: string): number {
   const is공동주택 = ["아파트","연립주택","다세대주택","기숙사"].some(k => 용도.includes(k));
   if (is공동주택) return 0;
-  return floorTopH <= 10 ? 1.5 : floorTopH / 2;
+  // 용도지역이 명시된 경우 전용·일반주거지역이 아니면 미적용
+  if (용도지역 && !(용도지역.includes("전용주거") || 용도지역.includes("일반주거"))) return 0;
+  return floorTopH <= 9 ? 1.5 : floorTopH / 2;
 }
 
 // ── Point-in-polygon (ray casting) ───────────────────────────────────────────
@@ -333,11 +337,11 @@ function buildFloorSvg(
   층고: number,
   parcelPts: [number, number][] | null,
   adjParcelsRaw: AdjacentParcel[] = [],
-): { svg: string; area: number } {
+): { svg: string; area: number; _northDist: number; _bldgDepth: number; _parcelDepth: number; _roadOffset: number; _northRef: number } {
   const W = 400, H = 360;
   const floorBottomH = floorIdx * 층고;
   const floorTopH    = (floorIdx + 1) * 층고;
-  const northSetbackM = calcNorthSetback(floorTopH, input.용도);
+  const northSetbackM = calcNorthSetback(floorTopH, input.용도, input.용도지역);
 
   // ── 법적 이격 상수 ─────────────────────────────────────────────────────
   const BASE_SB   = 0.5;    // 대지안의 공지 (인접 대지경계선, 기본 0.5m)
@@ -791,6 +795,11 @@ function buildFloorSvg(
   ${els}
 </svg>`,
     area,
+    _northDist: northRef - bMaxY,           // northRef → 건물 북단 실거리(m)
+    _bldgDepth: bMaxY - bMinY,               // 건물 남북 깊이(m)
+    _parcelDepth: parcelBox.maxY - parcelBox.minY,
+    _roadOffset: roadOffset,
+    _northRef: northRef,
   };
 }
 
@@ -853,6 +862,167 @@ function generateFloorRooms(용도: string, 가로: number, 세로: number, 층:
   }
 
   return rooms;
+}
+
+// ── 정북일조 N-S 단면도 SVG ────────────────────────────────────────────────────
+function buildNorthSectionSvg(
+  층수: number,
+  층고: number,
+  용도: string,
+  용도지역: string | undefined,
+  floorMeta: { northDist: number; bldgDepth: number }[],
+  parcelDepth: number,
+  roadOffset: number,
+): string {
+  const totalH = 층수 * 층고;
+  const is공동주택 = ["아파트","연립주택","다세대주택","기숙사"].some(k => 용도.includes(k));
+  const applyNorth = !is공동주택 && (!용도지역 || 용도지역.includes("전용주거") || 용도지역.includes("일반주거"));
+
+  const W = 400, H = 270;
+  const PAD_L = 52, PAD_R = 18, PAD_T = 36, PAD_B = 42;
+  const plotW = W - PAD_L - PAD_R;
+  const plotH = H - PAD_T - PAD_B;
+
+  // X축: northRef=0, 남쪽이 양수 방향
+  const maxDistRight = roadOffset + parcelDepth;
+  const domainLeft   = -(roadOffset + 1); // 도로 서측 약간 더 보임
+  const domainRight  = maxDistRight + 1;
+  const domainH      = totalH * 1.15;
+
+  const scX = plotW / (domainRight - domainLeft);
+  const scY = plotH / domainH;
+
+  const sx = (d: number) => PAD_L + (d - domainLeft) * scX;
+  const sy = (h: number) => H - PAD_B - h * scY;
+
+  let els = '';
+
+  // 제목
+  els += `<text x="${W/2}" y="18" text-anchor="middle" font-size="10" font-weight="bold" fill="#1e3a5f">정북일조 N-S 단면도</text>`;
+  els += `<text x="${W/2}" y="29" text-anchor="middle" font-size="7.5" fill="#6b7280">인접대지경계선 기준 · ${용도지역 ?? '용도지역 미확인'}</text>`;
+
+  // 배경: 도로 + 필지
+  if (roadOffset > 0.5) {
+    els += `<rect x="${sx(-roadOffset).toFixed(1)}" y="${PAD_T}" width="${(roadOffset*scX).toFixed(1)}" height="${plotH}" fill="#e5e7eb" fill-opacity="0.7"/>`;
+  }
+  els += `<rect x="${sx(0).toFixed(1)}" y="${PAD_T}" width="${(parcelDepth*scX).toFixed(1)}" height="${plotH}" fill="#fefce8" fill-opacity="0.5"/>`;
+
+  // 지면선
+  els += `<line x1="${PAD_L}" y1="${sy(0).toFixed(1)}" x2="${(W-PAD_R)}" y2="${sy(0).toFixed(1)}" stroke="#92400e" stroke-width="2"/>`;
+
+  // 인접대지경계선 (northRef)
+  const nx = sx(0);
+  els += `<line x1="${nx.toFixed(1)}" y1="${PAD_T}" x2="${nx.toFixed(1)}" y2="${sy(0).toFixed(1)}" stroke="#b45309" stroke-width="1.8" stroke-dasharray="5,3"/>`;
+  els += `<text x="${nx.toFixed(0)}" y="${PAD_T-4}" text-anchor="middle" font-size="6.5" fill="#b45309">인접대지경계선</text>`;
+
+  if (applyNorth) {
+    // 정북일조 제한 zone (해칭)
+    const h9y = sy(9); const h0y = sy(0); const htopY = sy(domainH);
+    const envelope9x = sx(1.5);
+    const envelopeTopX = sx(totalH > 9 ? totalH / 2 : 1.5);
+    const envelopeTopY = sy(totalH);
+
+    const zonePts: string[] = [];
+    zonePts.push(`${nx.toFixed(1)},${htopY.toFixed(1)}`);
+    zonePts.push(`${nx.toFixed(1)},${h0y.toFixed(1)}`);
+    zonePts.push(`${envelope9x.toFixed(1)},${h0y.toFixed(1)}`);
+    if (totalH > 9) {
+      zonePts.push(`${envelope9x.toFixed(1)},${h9y.toFixed(1)}`);
+      zonePts.push(`${envelopeTopX.toFixed(1)},${envelopeTopY.toFixed(1)}`);
+      zonePts.push(`${nx.toFixed(1)},${envelopeTopY.toFixed(1)}`);
+    } else {
+      zonePts.push(`${envelopeTopX.toFixed(1)},${envelopeTopY.toFixed(1)}`);
+      zonePts.push(`${nx.toFixed(1)},${envelopeTopY.toFixed(1)}`);
+    }
+
+    els += `<defs><pattern id="sh" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="6" stroke="#d97706" stroke-width="1.2" opacity="0.45"/>
+    </pattern></defs>`;
+    els += `<polygon points="${zonePts.join(' ')}" fill="url(#sh)"/>`;
+    els += `<polygon points="${zonePts.join(' ')}" fill="#fef3c7" fill-opacity="0.3"/>`;
+
+    // 제한선: 수직부(0~9m) + 사선부(9m~top)
+    els += `<line x1="${envelope9x.toFixed(1)}" y1="${h0y.toFixed(1)}" x2="${envelope9x.toFixed(1)}" y2="${h9y.toFixed(1)}" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5,2"/>`;
+    if (totalH > 9) {
+      els += `<line x1="${envelope9x.toFixed(1)}" y1="${h9y.toFixed(1)}" x2="${envelopeTopX.toFixed(1)}" y2="${envelopeTopY.toFixed(1)}" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5,2"/>`;
+    }
+    els += `<text x="${(envelope9x+6).toFixed(0)}" y="${(h9y-3).toFixed(0)}" font-size="6.5" fill="#d97706">9m (기준)</text>`;
+  }
+
+  // 건물 매스 (층별 계단형)
+  for (let i = 0; i < 층수; i++) {
+    const meta = floorMeta[i];
+    if (!meta) continue;
+    const fBot = sy(i * 층고);
+    const fTop = sy((i + 1) * 층고);
+    const fLeft  = sx(meta.northDist);
+    const fRight = sx(meta.northDist + meta.bldgDepth);
+    const w = Math.max(0, fRight - fLeft);
+    const h = Math.max(0, fBot - fTop);
+    els += `<rect x="${fLeft.toFixed(1)}" y="${fTop.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="#3b82f6" fill-opacity="0.28" stroke="#2563eb" stroke-width="1"/>`;
+    // 층 번호
+    if (w > 20) {
+      const mid = ((fLeft + fRight) / 2).toFixed(0);
+      const vmid = ((fTop + fBot) / 2 + 3).toFixed(0);
+      els += `<text x="${mid}" y="${vmid}" text-anchor="middle" font-size="6.5" fill="#1d4ed8">${i+1}F</text>`;
+    }
+  }
+
+  // 도로 라벨
+  if (roadOffset > 0.5) {
+    const roadMidX = sx(-roadOffset / 2);
+    els += `<text x="${roadMidX.toFixed(0)}" y="${(sy(0)+13).toFixed(0)}" text-anchor="middle" font-size="7" fill="#6b7280">도로 ${roadOffset.toFixed(1)}m</text>`;
+  }
+
+  // 치수: 최상층 정북이격
+  if (applyNorth && floorMeta.length > 0) {
+    const topMeta = floorMeta[floorMeta.length - 1];
+    const topH = 층수 * 층고;
+    const reqSetback = topH <= 9 ? 1.5 : topH / 2;
+    const dimY = sy(0) + 22;
+    const x0 = sx(0); const x1 = sx(topMeta.northDist);
+    els += `<line x1="${x0.toFixed(1)}" y1="${dimY}" x2="${x1.toFixed(1)}" y2="${dimY}" stroke="#b45309" stroke-width="0.9"/>`;
+    els += `<line x1="${x0.toFixed(1)}" y1="${(dimY-3)}" x2="${x0.toFixed(1)}" y2="${(dimY+3)}" stroke="#b45309" stroke-width="0.9"/>`;
+    els += `<line x1="${x1.toFixed(1)}" y1="${(dimY-3)}" x2="${x1.toFixed(1)}" y2="${(dimY+3)}" stroke="#b45309" stroke-width="0.9"/>`;
+    const midX = ((x0+x1)/2).toFixed(0);
+    els += `<rect x="${(Number(midX)-18)}" y="${dimY+3}" width="36" height="11" fill="white" fill-opacity="0.9" rx="1"/>`;
+    els += `<text x="${midX}" y="${dimY+12}" text-anchor="middle" font-size="7.5" fill="#b45309">${reqSetback.toFixed(2)}m</text>`;
+  }
+
+  // 공동주택 / 비주거 안내
+  if (!applyNorth) {
+    const note = is공동주택 ? "공동주택: 채광기준(§61②) 적용" : `정북일조 미적용 (${용도지역 || '용도지역 미입력'})`;
+    els += `<rect x="${PAD_L+4}" y="${PAD_T+4}" width="${plotW-8}" height="22" fill="#fef9c3" fill-opacity="0.85" rx="3"/>`;
+    els += `<text x="${PAD_L + plotW/2}" y="${PAD_T+18}" text-anchor="middle" font-size="8.5" fill="#92400e">${note}</text>`;
+  }
+
+  // Y축 (높이 눈금)
+  const hTicks = Array.from({ length: Math.ceil(totalH / 3) + 1 }, (_, k) => k * 3).filter(h => h <= domainH);
+  for (const h of hTicks) {
+    const y = sy(h);
+    els += `<line x1="${PAD_L-4}" y1="${y.toFixed(1)}" x2="${PAD_L}" y2="${y.toFixed(1)}" stroke="#9ca3af" stroke-width="0.8"/>`;
+    els += `<text x="${(PAD_L-6)}" y="${(y+3).toFixed(0)}" text-anchor="end" font-size="7" fill="#6b7280">${h}m</text>`;
+  }
+  // Y축 라벨
+  const ymid = ((PAD_T + H - PAD_B) / 2).toFixed(0);
+  els += `<text x="10" y="${ymid}" text-anchor="middle" font-size="7.5" fill="#374151" transform="rotate(-90 10 ${ymid})">높이(m)</text>`;
+
+  // X축 눈금
+  const xTicks = [0, 2, 4, 6, 8, 10, 15, 20].filter(d => d >= domainLeft && d <= domainRight);
+  for (const d of xTicks) {
+    const x = sx(d);
+    const gy = sy(0);
+    els += `<line x1="${x.toFixed(1)}" y1="${gy.toFixed(1)}" x2="${x.toFixed(1)}" y2="${(gy+4).toFixed(0)}" stroke="#9ca3af" stroke-width="0.8"/>`;
+    els += `<text x="${x.toFixed(0)}" y="${(gy+13).toFixed(0)}" text-anchor="middle" font-size="7" fill="#6b7280">${d}m</text>`;
+  }
+  els += `<text x="${((PAD_L + W - PAD_R)/2).toFixed(0)}" y="${(H-3)}" text-anchor="middle" font-size="7.5" fill="#374151">← 북 / 남 → (m)</text>`;
+
+  // 북 화살표
+  els += `<line x1="18" y1="${PAD_T+20}" x2="18" y2="${PAD_T+8}" stroke="#ef4444" stroke-width="1.8"/>`;
+  els += `<polygon points="18,${PAD_T+8} 14,${PAD_T+16} 22,${PAD_T+16}" fill="#ef4444"/>`;
+  els += `<text x="18" y="${PAD_T+30}" text-anchor="middle" font-size="8" font-weight="bold" fill="#ef4444">N</text>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="auto" viewBox="0 0 ${W} ${H}" font-family="sans-serif">${els}</svg>`;
 }
 
 // ── DXF (R2007 / AC1021) 생성 — 층별 3D LINE + 실 레이아웃 ──────────────────
@@ -954,18 +1124,35 @@ function buildDxf(input: LayoutInput, 가로: number, 세로: number, 층고: nu
   return out.join("\n");
 }
 
+// ── 용도별 층고 기준 ──────────────────────────────────────────────────────────
+function get층고(용도: string): number {
+  if (["아파트","연립주택","다세대주택","기숙사","단독주택","주거"].some(k => 용도.includes(k))) return 2.9;
+  if (["판매","의료","병원","위락","문화집회"].some(k => 용도.includes(k))) return 4.0;
+  if (["업무","오피스","교육연구","학교"].some(k => 용도.includes(k))) return 3.5;
+  return 3.3; // 근생·기타
+}
+
+// ── 주차대수 간이 산출 (연면적 기반) ────────────────────────────────────────
+function calcParkingCount(용도: string, 연면적: number): number {
+  if (["아파트","연립주택","다세대주택"].some(k => 용도.includes(k))) return Math.ceil(연면적 / 75);
+  if (["업무","판매"].some(k => 용도.includes(k))) return Math.ceil(연면적 / 150);
+  if (용도.includes("근린")) return Math.ceil(연면적 / 134);
+  if (용도.includes("단독주택")) return 연면적 >= 50 ? 1 : 0;
+  return Math.ceil(연면적 / 200);
+}
+
 export async function POST(req: NextRequest) {
   const input: LayoutInput = await req.json();
   if (!input.대지면적 || !input.건폐율 || !input.층수) {
     return NextResponse.json({ error: "대지면적·건폐율·층수가 필요합니다." }, { status: 400 });
   }
 
-  const 건축면적 = input.대지면적 * (input.건폐율 / 100);
-  const 가로 = input.대지가로 && input.대지가로 > 0 ? input.대지가로 : Math.sqrt(건축면적);
-  const 세로 = input.대지세로 && input.대지세로 > 0 ? input.대지세로 : 건축면적 / 가로;
-  const 층고  = input.용도.includes("주거") || input.용도.includes("아파트") ? 2.9 : 3.3;
+  const 건축면적목표 = input.대지면적 * (input.건폐율 / 100);
+  const 가로 = input.대지가로 && input.대지가로 > 0 ? input.대지가로 : Math.sqrt(건축면적목표);
+  const 세로 = input.대지세로 && input.대지세로 > 0 ? input.대지세로 : 건축면적목표 / 가로;
+  const 층고  = get층고(input.용도);
 
-  // 실제 필지 폴리곤 + 인접 필지 조회 (lat/lng가 있는 경우)
+  // 실제 필지 폴리곤 + 인접 필지 조회
   const [parcelPts, adjParcels] = (input.lat && input.lng)
     ? await Promise.all([
         fetchTargetParcel(input.lat, input.lng),
@@ -973,27 +1160,55 @@ export async function POST(req: NextRequest) {
       ])
     : [null, [] as AdjacentParcel[]];
 
-  const floors = Array.from({ length: input.층수 }, (_, i) => {
-    const { svg, area } = buildFloorSvg(i, input, 가로, 세로, 층고, parcelPts, adjParcels);
-    return { floor: i + 1, area, svg };
-  });
-  const gltfJson  = buildHyparJson(input, 가로, 세로, 층고);
-  const dxf       = buildDxf(input, 가로, 세로, 층고);
+  const floorResults = Array.from({ length: input.층수 }, (_, i) =>
+    buildFloorSvg(i, input, 가로, 세로, 층고, parcelPts, adjParcels)
+  );
 
-  const 연면적 = floors.reduce((s, f) => s + f.area, 0);
+  const floors = floorResults.map((r, i) => ({ floor: i + 1, area: r.area, svg: r.svg }));
+  const gltfJson = buildHyparJson(input, 가로, 세로, 층고);
+  const dxf      = buildDxf(input, 가로, 세로, 층고);
 
-  const is공동주택_stat = ["아파트","연립주택","다세대주택","기숙사"].some(k => input.용도.includes(k));
+  const 연면적     = floorResults.reduce((s, f) => s + f.area, 0);
+  const 건축면적실  = floorResults[0]?.area ?? 건축면적목표;
+
+  // 단면도 데이터 (층별 northDist, bldgDepth)
+  const floorMeta = floorResults.map(r => ({ northDist: r._northDist, bldgDepth: r._bldgDepth }));
+  const f0 = floorResults[0];
+  const parcelDepth = f0?._parcelDepth ?? Math.sqrt(input.대지면적);
+  const roadOffset  = f0?._roadOffset  ?? 0;
+
+  const northSectionSvg = buildNorthSectionSvg(
+    input.층수, 층고, input.용도, input.용도지역,
+    floorMeta, parcelDepth, roadOffset,
+  );
+
+  // 정북일조 영향층 (northDist가 1층보다 증가하기 시작하는 층)
+  const 정북영향층 = floorResults.findIndex((r, i) => i > 0 && r._northDist > floorResults[0]._northDist + 0.1) + 1;
+
+  // 주차대수
+  const 주차대수 = calcParkingCount(input.용도, 연면적);
+
+  const is공동주택 = ["아파트","연립주택","다세대주택","기숙사"].some(k => input.용도.includes(k));
+  const 달성건폐율 = Math.round(건축면적실 / input.대지면적 * 1000) / 10;
+  const 달성용적률 = Math.round(연면적 / input.대지면적 * 1000) / 10;
+
   return NextResponse.json({
     floors,
     gltfJson,
     dxf,
     stats: {
-      건축면적:   Math.round(건축면적 * 10) / 10,
-      연면적:     Math.round(연면적 * 10) / 10,
-      층수:       input.층수,
+      건축면적:    Math.round(건축면적실 * 10) / 10,
+      연면적:      Math.round(연면적 * 10) / 10,
+      층수:        input.층수,
       층고,
-      총높이:     Math.round(input.층수 * 층고 * 10) / 10,
-      is공동주택: is공동주택_stat,
+      총높이:      Math.round(input.층수 * 층고 * 10) / 10,
+      is공동주택,
+      용도지역:    input.용도지역 ?? "",
+      달성건폐율,
+      달성용적률,
+      주차대수,
+      정북영향층:  정북영향층 > 0 ? 정북영향층 : null,
+      northSectionSvg,  // 단면도 SVG
     },
   });
 }
