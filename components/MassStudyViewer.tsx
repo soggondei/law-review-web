@@ -203,11 +203,12 @@ export default function MassStudyViewer({ floors, stats }: { floors: FloorData[]
                             const topH = (fi + 1) * stats.층고;
                             // §86①: 높이 10m 이하 → 1.5m, 10m 초과 → 높이/2
                             const rawSetback = topH <= 10 ? 1.5 : topH / 2;
-                            // §86⑥: 북측 도로가 있으면 이격거리 = max(0, rawSetback - roadOffset)
+                            // §86⑥: 북측 도로가 있으면 실효이격 = max(0, rawSetback - roadOffset)
                             const roadOff = stats.northRoadOffset ?? 0;
-                            const setback = Math.max(0, rawSetback - roadOff);
+                            const effectiveSetback = Math.max(0, rawSetback - roadOff);
+                            const coveredByRoad = roadOff > 0.5 && effectiveSetback === 0;
                             const isCurrent = fi === activeFloor;
-                            const isWarn = setback > 1.5;
+                            const isWarn = effectiveSetback > 1.5;
                             const isImpact = stats.정북영향층 != null && fi + 1 >= stats.정북영향층;
                             return (
                               <tr
@@ -221,8 +222,14 @@ export default function MassStudyViewer({ floors, stats }: { floors: FloorData[]
                                 <td className={`px-2 py-1 text-center ${isCurrent ? "text-blue-600" : "text-gray-500"}`}>
                                   {topH.toFixed(1)}m
                                 </td>
-                                <td className={`px-2 py-1 text-center font-semibold ${isCurrent ? "text-blue-700" : isWarn ? "text-amber-600" : "text-gray-700"}`}>
-                                  {setback === 0 ? <span className="text-emerald-600">–</span> : `${setback.toFixed(2)}m`}
+                                <td className={`px-2 py-1 text-center font-semibold`}>
+                                  {coveredByRoad ? (
+                                    <span className="text-gray-400 line-through text-[9px]">{rawSetback.toFixed(2)}m</span>
+                                  ) : (
+                                    <span className={isCurrent ? "text-blue-700" : isWarn ? "text-amber-600" : "text-gray-700"}>
+                                      {effectiveSetback.toFixed(2)}m
+                                    </span>
+                                  )}
                                 </td>
                               </tr>
                             );

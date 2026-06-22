@@ -962,29 +962,44 @@ function buildNorthSectionSvg(
   // 지면선
   els += `<line x1="${PAD_L}" y1="${sy(0).toFixed(1)}" x2="${(W-PAD_R)}" y2="${sy(0).toFixed(1)}" stroke="#92400e" stroke-width="2"/>`;
 
-  // 인접대지경계선 (northRef)
-  const nx = sx(0);
-  els += `<line x1="${nx.toFixed(1)}" y1="${PAD_T}" x2="${nx.toFixed(1)}" y2="${sy(0).toFixed(1)}" stroke="#b45309" stroke-width="1.8" stroke-dasharray="5,3"/>`;
-  els += `<text x="${nx.toFixed(0)}" y="${PAD_T-4}" text-anchor="middle" font-size="6.5" fill="#b45309">인접대지경계선</text>`;
+  // §86⑥: 북측 도로가 있으면 인접대지경계선 = 도로 반대편 경계선
+  // 좌표계: d=0 = 우리 필지 북단, d<0 = 북쪽(도로), d>0 = 남쪽(우리 필지)
+  const hasRoadSec = roadOffset > 0.5;
+  // 인접대지경계선 d 값: 도로 있으면 -roadOffset(도로 반대편), 없으면 0(우리 필지 북단)
+  const adjBoundD = hasRoadSec ? -roadOffset : 0;
+  const adjBx = sx(adjBoundD);
+
+  // 인접대지경계선 (주황 점선)
+  els += `<line x1="${adjBx.toFixed(1)}" y1="${PAD_T}" x2="${adjBx.toFixed(1)}" y2="${sy(0).toFixed(1)}" stroke="#b45309" stroke-width="1.8" stroke-dasharray="5,3"/>`;
+  const adjLabel = hasRoadSec ? "인접대지경계선 (§86⑥)" : "인접대지경계선";
+  els += `<text x="${adjBx.toFixed(0)}" y="${PAD_T-4}" text-anchor="middle" font-size="6.5" fill="#b45309">${adjLabel}</text>`;
+
+  // 도로가 있을 때 우리 필지 북단도 별도 표시
+  if (hasRoadSec) {
+    const lotNx = sx(0);
+    els += `<line x1="${lotNx.toFixed(1)}" y1="${PAD_T}" x2="${lotNx.toFixed(1)}" y2="${sy(0).toFixed(1)}" stroke="#9ca3af" stroke-width="1" stroke-dasharray="3,2"/>`;
+    els += `<text x="${lotNx.toFixed(0)}" y="${PAD_T-4}" text-anchor="middle" font-size="5.5" fill="#6b7280">우리 필지 북단</text>`;
+  }
 
   if (applyNorth && !is채광공동주택) {
-    // §86① 정북일조 제한 zone (해칭): 높이 10m 이하 1.5m, 10m 초과 높이/2
+    // §86① 정북일조 제한 zone: 인접대지경계선(adjBoundD)에서 1.5m / h/2 남쪽까지
+    // 도로가 있으면 zone이 도로 안에 위치 → 우리 필지에 이격 불필요
     const h10y = sy(10); const h0y = sy(0); const htopY = sy(domainH);
-    const envelope10x = sx(1.5);
-    const envelopeTopX = sx(totalH > 10 ? totalH / 2 : 1.5);
+    const envelope10x  = sx(adjBoundD + 1.5);
+    const envelopeTopX = sx(adjBoundD + (totalH > 10 ? totalH / 2 : 1.5));
     const envelopeTopY = sy(totalH);
 
     const zonePts: string[] = [];
-    zonePts.push(`${nx.toFixed(1)},${htopY.toFixed(1)}`);
-    zonePts.push(`${nx.toFixed(1)},${h0y.toFixed(1)}`);
+    zonePts.push(`${adjBx.toFixed(1)},${htopY.toFixed(1)}`);
+    zonePts.push(`${adjBx.toFixed(1)},${h0y.toFixed(1)}`);
     zonePts.push(`${envelope10x.toFixed(1)},${h0y.toFixed(1)}`);
     if (totalH > 10) {
       zonePts.push(`${envelope10x.toFixed(1)},${h10y.toFixed(1)}`);
       zonePts.push(`${envelopeTopX.toFixed(1)},${envelopeTopY.toFixed(1)}`);
-      zonePts.push(`${nx.toFixed(1)},${envelopeTopY.toFixed(1)}`);
+      zonePts.push(`${adjBx.toFixed(1)},${envelopeTopY.toFixed(1)}`);
     } else {
       zonePts.push(`${envelopeTopX.toFixed(1)},${envelopeTopY.toFixed(1)}`);
-      zonePts.push(`${nx.toFixed(1)},${envelopeTopY.toFixed(1)}`);
+      zonePts.push(`${adjBx.toFixed(1)},${envelopeTopY.toFixed(1)}`);
     }
 
     els += `<defs><pattern id="sh" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -998,7 +1013,9 @@ function buildNorthSectionSvg(
     if (totalH > 10) {
       els += `<line x1="${envelope10x.toFixed(1)}" y1="${h10y.toFixed(1)}" x2="${envelopeTopX.toFixed(1)}" y2="${envelopeTopY.toFixed(1)}" stroke="#d97706" stroke-width="1.6" stroke-dasharray="5,2"/>`;
     }
-    els += `<text x="${(envelope10x+6).toFixed(0)}" y="${(h10y-3).toFixed(0)}" font-size="6.5" fill="#d97706">10m (기준)</text>`;
+    // "10m 기준" 라벨: zone이 도로 안에 있으면 우리 필지 쪽에 표시
+    const labelX = Math.max(Number(sx(0.5).toFixed(0)), Number((envelope10x + 6).toFixed(0)));
+    els += `<text x="${labelX}" y="${(h10y-3).toFixed(0)}" font-size="6.5" fill="#d97706">10m 기준(§86①)</text>`;
   }
 
   // 건물 매스 (층별 계단형)
@@ -1026,13 +1043,15 @@ function buildNorthSectionSvg(
     els += `<text x="${roadMidX.toFixed(0)}" y="${(sy(0)+13).toFixed(0)}" text-anchor="middle" font-size="7" fill="#6b7280">도로 ${roadOffset.toFixed(1)}m</text>`;
   }
 
-  // 치수: 최상층 정북이격
+  // 치수: 최상층 정북이격 (실효이격 > 0인 경우만 — 도로로 충족되면 미표시)
   if (applyNorth && !is채광공동주택 && secEffectiveSetback > 0 && floorMeta.length > 0) {
     const topMeta = floorMeta[floorMeta.length - 1];
     const topH = 층수 * 층고;
     const reqSetback = topH <= 10 ? 1.5 : topH / 2;
     const dimY = sy(0) + 22;
-    const x0 = sx(0); const x1 = sx(topMeta.northDist);
+    // 치수: 인접대지경계선(adjBx) → 건물 북단(sx(topMeta.northDist + adjBoundD + roadOffset))
+    // 도로 없음 시 adjBoundD=0, adjBx=sx(0)
+    const x0 = adjBx; const x1 = sx(topMeta.northDist);
     els += `<line x1="${x0.toFixed(1)}" y1="${dimY}" x2="${x1.toFixed(1)}" y2="${dimY}" stroke="#b45309" stroke-width="0.9"/>`;
     els += `<line x1="${x0.toFixed(1)}" y1="${(dimY-3)}" x2="${x0.toFixed(1)}" y2="${(dimY+3)}" stroke="#b45309" stroke-width="0.9"/>`;
     els += `<line x1="${x1.toFixed(1)}" y1="${(dimY-3)}" x2="${x1.toFixed(1)}" y2="${(dimY+3)}" stroke="#b45309" stroke-width="0.9"/>`;
