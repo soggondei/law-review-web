@@ -194,13 +194,16 @@ function polyIntervalsAtY(poly: [number, number][], y: number): [number, number]
   return result;
 }
 
-// ── 정북일조 이격거리 계산 (건축법 제61조·시행령 제86조 제1항) ─────────────────
-// 적용대상: 전용주거지역·일반주거지역만. 준주거·상업·공업 등 미적용.
-// 비공동주택: 높이 9m 이하 → 1.5m, 9m 초과 → 높이/2 (§86①의 기준값)
-// 공동주택(아파트·연립·다세대·기숙사): 채광기준(제61조제2항) 별도 적용 → 0 반환
+// ── 정북일조 이격거리 계산 (건축법 시행령 §86①) ─────────────────────────────
+// 적용: 전용/일반주거지역 + 비§86③공동주택 + 북측이 도로가 아닌 경우
+// §86③ 공동주택(아파트·연립·기숙사, 다세대 제외): 채광기준 별도 적용 → 0 반환
+// 다세대주택: §86① 적용 대상 (§86③ 제외 명시됨)
+// 이격: 높이 9m 이하 → 1.5m, 9m 초과 → 높이/2
+// ※ 북측 도로 여부 판단은 buildFloorSvg 내 hasNorthRoad로 처리 (여기서는 0 반환)
 function calcNorthSetback(floorTopH: number, 용도: string, 용도지역?: string): number {
-  const is공동주택 = ["아파트","연립주택","다세대주택","기숙사"].some(k => 용도.includes(k));
-  if (is공동주택) return 0;
+  // §86③ 공동주택(아파트·연립·기숙사)은 정북일조 §86① 비적용
+  const is채광공동주택 = ["아파트","연립주택","기숙사"].some(k => 용도.includes(k));
+  if (is채광공동주택) return 0;
   // 용도지역이 명시된 경우 전용·일반주거지역이 아니면 미적용
   if (용도지역 && !(용도지역.includes("전용주거") || 용도지역.includes("일반주거"))) return 0;
   return floorTopH <= 9 ? 1.5 : floorTopH / 2;
@@ -576,23 +579,36 @@ function buildFloorSvg(
     return best;
   }
 
-  // 정북일조 제한선: 항상 우리 필지 북향 에지(northFacingEdges)에서 setback
-  // §86①: 인접대지경계선(우리 필지 북단)에서 이격
-  // §86③: 8m 이상 도로 → 도로폭만큼 완화 (setback - roadOffset, 최소 0)
-  // northRef(bbox.maxY)는 기울어진 도로에서 실제보다 훨씬 크므로 직접 사용 금지
-  const effectiveSetback = (northRoad && roadOffset >= 8)
-    ? Math.max(0, northSetbackM - roadOffset)
-    : northSetbackM;
+  // ── 정북일조 이격 계산 ──────────────────────────────────────────────────────
+  // §86①: 비공동주택 + 전용/일반주거지역 → 인접대지경계선(우리 필지 북단) 기준
+  //        북측이 도로인 경우: 도로는 인접대지경계선이 아님 → 비적용
+  // §86③: 공동주택(아파트·연립, 다세대 제외) → §86① 비적용, 채광기준
+  //        북측에 도로 있을 시: 도로 중심선 기준으로 채광기준 표시
+  const hasNorthRoad = northRoad !== undefined && roadOffset > 0.5;
+  // 다세대주택은 §86③ 대상이 아닌 §86① 적용
+  const is채광공동주택 = ["아파트","연립주택","기숙사"].some(k => input.용도.includes(k));
 
-  const restrictionSegs: [[number,number],[number,number]][] = northFacingEdges.map(([A, B]) => [
-    [A[0], A[1] - effectiveSetback],
-    [B[0], B[1] - effectiveSetback],
-  ] as [[number,number],[number,number]]);
+  const effectiveSetback: number = (() => {
+    if (is채광공동주택) return 0; // 공동주택(아파트·연립): §86① 비적용
+    if (hasNorthRoad)   return 0; // 북측 도로: 도로는 인접대지경계선 아님 → 비적용
+    return northSetbackM;          // 비공동주택 + 북측 대지: §86① 적용
+  })();
 
-  // 건물 북단 한계: restrictionSegs와 일치 (기울어진 도로에서 northRef 오차 방지)
+  // 도로 중심선 Y (공동주택 §86③ 채광기준 표시용)
+  const roadCenterY = hasNorthRoad ? parcelBox.maxY + roadOffset / 2 : parcelBox.maxY;
+
+  // 정북일조제한선 세그먼트: effectiveSetback > 0인 경우만
+  const restrictionSegs: [[number,number],[number,number]][] = effectiveSetback > 0
+    ? northFacingEdges.map(([A, B]) => [
+        [A[0], A[1] - effectiveSetback],
+        [B[0], B[1] - effectiveSetback],
+      ] as [[number,number],[number,number]])
+    : [];
+
+  // 건물 북단 한계: 이격 없으면 필지 북단까지 (BASE_SB 인셋이 실제 한계)
   const bldgNorthLimit = restrictionSegs.length > 0
     ? Math.min(...restrictionSegs.flatMap(([rA, rB]) => [rA[1], rB[1]]))
-    : parcelBox.maxY - effectiveSetback;
+    : parcelBox.maxY;
 
   const northLimit = Math.max(bzMinY + EPS, Math.min(bldgNorthLimit, bzMaxY - EPS));
   const bestRes = findMaxRect(bzMinY, northLimit);
@@ -609,9 +625,8 @@ function buildFloorSvg(
   // 우리 필지가 화면 주인공. 북측 인접대지는 최대 5m 폭 노출만.
   const PAD       = 3;
   const parcelNS  = parcelBox.maxY - parcelBox.minY;
-  // 북쪽으로 보여줄 범위: 정북이격 + 여유 1m (최소 3m, 최대 5m)
-  // 북쪽 표시 범위: 도로 폭 포함, 인접대지경계선이 보이도록
-  const northShow = Math.max(3, Math.min(Math.max(northSetbackM, roadOffset) + 2, 12));
+  // 북쪽 표시 범위: 도로가 있으면 도로 폭, 없으면 이격거리 기준 + 여유
+  const northShow = Math.max(3, Math.min((hasNorthRoad ? roadOffset : effectiveSetback) + 3, 12));
   // 스케일: 우리 필지 + 북쪽 노출 범위를 기준으로 계산
   const dataW = parcelBox.maxX - parcelBox.minX + PAD * 2;
   const dataH = parcelNS + northShow + PAD * 2;
@@ -628,7 +643,7 @@ function buildFloorSvg(
 
   const is공동주택 = ["아파트","연립주택","다세대주택","기숙사"].some(k => input.용도.includes(k));
 
-  // ── hatch 패턴 정의 ─────────────────────────────────────────────────
+  // ── hatch 패턴 정의 ──────────────────────────────────────────────────
   let els = `<defs>
   <pattern id="northHatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
     <line x1="0" y1="0" x2="0" y2="8" stroke="#d97706" stroke-width="1.5" opacity="0.35"/>
@@ -654,25 +669,15 @@ function buildFloorSvg(
     els += `<text x="${lax.toFixed(0)}" y="${(lay + 4).toFixed(0)}" text-anchor="middle" font-size="7" fill="${isRoad ? '#92400e' : '#64748b'}">${isRoad ? '도로' : (ap.jimok || '인접대지')}</text>`;
   }
 
-  // 인접대지경계선 강조 — 우리 필지 북향 에지(이격 기준선) 표시
-  if (!is공동주택) {
-    // ① 우리 필지 북향 에지: 이격 기준선 (굵은 갈색 실선)
+  // 인접대지경계선 강조 표시
+  // §86①: 비공동주택 + 북측 대지 → 우리 필지 북향 에지가 이격 기준선
+  // 북측이 도로인 경우: 도로는 인접대지경계선이 아님 → 정북일조 비적용, 기준선 미표시
+  if (!is채광공동주택 && !hasNorthRoad && effectiveSetback > 0) {
     for (const [nbA, nbB] of northFacingEdges) {
       const [ax, ay] = toSvg(nbA[0], nbA[1]);
       const [bx, by] = toSvg(nbB[0], nbB[1]);
       els += `<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#b45309" stroke-width="2.2"/>`;
     }
-    // ② 도로 반대편 경계선: 참고용 (얇은 갈색 점선, SVG 범위 내만)
-    if (northRoad && roadOffset > 0.5) {
-      for (const [nbA, nbB] of northBoundarySegs) {
-        const maxSegY = Math.max(nbA[1], nbB[1]);
-        if (maxSegY > parcelBox.maxY + northShow + 0.5) continue;
-        const [ax, ay] = toSvg(nbA[0], nbA[1]);
-        const [bx, by] = toSvg(nbB[0], nbB[1]);
-        els += `<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#92400e" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.7"/>`;
-      }
-    }
-    // 라벨: 우리 필지 북향 에지 중점 기준
     const allNbPts = northFacingEdges.flatMap(([A, B]) => [A, B]);
     if (allNbPts.length > 0) {
       const nrLblX = allNbPts.reduce((s, p) => s + p[0], 0) / allNbPts.length;
@@ -682,6 +687,15 @@ function buildFloorSvg(
       els += `<text x="${nrSvgX.toFixed(0)}" y="${(nrSvgY - 4).toFixed(0)}" text-anchor="middle" font-size="6.5" fill="#b45309">인접대지경계선 (기준)</text>`;
     }
   }
+  // §86③: 공동주택 + 북측 도로 → 도로 중심선 표시 (채광기준 기준점)
+  if (is채광공동주택 && hasNorthRoad) {
+    const [cx1, cy1] = toSvg(parcelBox.minX, roadCenterY);
+    const [cx2, cy2] = toSvg(parcelBox.maxX, roadCenterY);
+    els += `<line x1="${cx1.toFixed(1)}" y1="${cy1.toFixed(1)}" x2="${cx2.toFixed(1)}" y2="${cy2.toFixed(1)}" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+    const [rdcX, rdcY] = toSvg(0, roadCenterY);
+    els += `<rect x="${(rdcX - 58).toFixed(0)}" y="${(rdcY - 11).toFixed(0)}" width="116" height="9" fill="white" fill-opacity="0.85" rx="1"/>`;
+    els += `<text x="${rdcX.toFixed(0)}" y="${(rdcY - 4).toFixed(0)}" text-anchor="middle" font-size="6.5" fill="#7c3aed">도로 중심선 (채광기준 기준, §86③)</text>`;
+  }
 
   // ② 필지 경계 (이점쇄선) — 가장 굵게 (위계 1)
   els += `<polygon points="${ptStr(parcel)}" fill="#fefce8" stroke="#6b7280" stroke-width="2.5" stroke-dasharray="12,3,2,3,2,3"/>`;
@@ -689,20 +703,13 @@ function buildFloorSvg(
   // ③ 건축가능영역 배경
   els += `<polygon points="${ptStr(buildableRect)}" fill="#eff6ff" fill-opacity="0.4" stroke="none"/>`;
 
-  // ④ 정북일조 이격대: 실제 필지 북측 형상을 따라 해칭 (clipPolygonNorthOf)
-  if (!is공동주택 && bldgNorthLimit < parcelBox.maxY) {
+  // ④ 정북일조 이격대: 실제 필지 북측 형상을 따라 해칭
+  // effectiveSetback > 0: 비공동주택 + 북측 대지인 경우만 표시
+  if (effectiveSetback > 0 && bldgNorthLimit < parcelBox.maxY) {
     const restrictZone = clipPolygonNorthOf(parcel, bldgNorthLimit);
     if (restrictZone.length >= 3) {
       els += `<polygon points="${ptStr(restrictZone)}" fill="url(#northHatch)" stroke="none"/>`;
       els += `<polygon points="${ptStr(restrictZone)}" fill="#fef3c7" fill-opacity="0.35" stroke="none"/>`;
-    }
-    // 도로 있을 경우: 도로~우리 필지 북단 구간도 연한 표시
-    if (northRoad) {
-      const roadBands: [number,number][] = [
-        [parcelBox.minX, parcelBox.maxY], [parcelBox.maxX, parcelBox.maxY],
-        [parcelBox.maxX, northRef],       [parcelBox.minX, northRef],
-      ];
-      els += `<polygon points="${ptStr(roadBands)}" fill="#d1d5db" fill-opacity="0.3" stroke="none"/>`;
     }
   }
 
@@ -713,48 +720,43 @@ function buildFloorSvg(
   // ⑥ 건축가능영역 테두리 (건물 위) — 위계 2
   els += `<polygon points="${ptStr(buildableRect)}" fill="none" stroke="#3b82f6" stroke-width="2" stroke-dasharray="5,3"/>`;
 
-  // ⑦ 정북일조제한선 + 북측 기준경계선 + 치수선
-  if (!is공동주택) {
+  // ⑦ 정북일조제한선 + 치수선
+  // 비공동주택 + 북측 대지(effectiveSetback > 0)인 경우만 표시
+  if (effectiveSetback > 0 && restrictionSegs.length > 0) {
 
-    // ⑦-a 정북일조제한선: 인접대지경계선 형태를 따르는 폴리선
-    if (northSetbackM > 0 && restrictionSegs.length > 0) {
-      for (const [rA, rB] of restrictionSegs) {
-        const [ax, ay] = toSvg(rA[0], rA[1]);
-        const [bx, by] = toSvg(rB[0], rB[1]);
-        els += `<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#d97706" stroke-width="2" stroke-dasharray="6,3"/>`;
-      }
-
-      // 라벨: 이격대 중간 (제한선 세그먼트 중앙 ~ northRef 중점)
-      const allRPts = restrictionSegs.flatMap(([rA, rB]) => [rA, rB]);
-      const rMidX   = allRPts.reduce((s, p) => s + p[0], 0) / allRPts.length;
-      const rMidY   = allRPts.reduce((s, p) => s + p[1], 0) / allRPts.length;
-      const [lmSvgX, ] = toSvg(rMidX, 0);
-      const [, lmSvgY] = toSvg(0, (rMidY + northRef) / 2);
-      const lbl = `정북일조제한선 (h=${floorTopH.toFixed(1)}m → ${northSetbackM.toFixed(2)}m)`;
-      els += `<rect x="${(lmSvgX - 78).toFixed(0)}" y="${(lmSvgY - 8).toFixed(0)}" width="156" height="10" fill="white" fill-opacity="0.85" rx="1"/>`;
-      els += `<text x="${lmSvgX.toFixed(0)}" y="${lmSvgY.toFixed(0)}" text-anchor="middle" font-size="6.5" fill="#b45309">${lbl}</text>`;
-
-      // ⑦-b 치수선: 우리 필지 북향 에지 → 제한선 (northRef bbox.maxY는 기울어진 도로에서 오차 큼)
-      const northFacingMaxY = northFacingEdges.length > 0
-        ? Math.max(...northFacingEdges.flatMap(([A, B]) => [A[1], B[1]]))
-        : parcelBox.maxY;
-      const dimRefY   = northFacingMaxY;
-      const dimLimitY = northFacingMaxY - effectiveSetback;
-      const [, dimRefSvgY  ] = toSvg(0, dimRefY);
-      const [, dimLimitSvgY] = toSvg(0, dimLimitY);
-      const [dimSvgXbase,  ] = toSvg(parcelBox.minX, 0);
-      const dimX = Math.max(8, dimSvgXbase - 16);
-
-      els += `<line x1="${dimX}" y1="${dimRefSvgY.toFixed(1)}" x2="${dimX}" y2="${dimLimitSvgY.toFixed(1)}" stroke="#d97706" stroke-width="0.8" stroke-dasharray="2,2"/>`;
-      // 인접대지경계선 틱
-      els += `<line x1="${(dimX-3).toFixed(0)}" y1="${dimRefSvgY.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${dimRefSvgY.toFixed(1)}" stroke="#d97706" stroke-width="1.2"/>`;
-      // 제한선 틱
-      els += `<line x1="${(dimX-3).toFixed(0)}" y1="${dimLimitSvgY.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${dimLimitSvgY.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
-      // 치수 텍스트
-      const midDimSvgY = ((dimRefSvgY + dimLimitSvgY) / 2).toFixed(0);
-      els += `<rect x="${(dimX - 21).toFixed(0)}" y="${(Number(midDimSvgY) - 8).toFixed(0)}" width="20" height="10" fill="white" fill-opacity="0.9" rx="1"/>`;
-      els += `<text x="${(dimX - 11).toFixed(0)}" y="${midDimSvgY}" text-anchor="middle" font-size="7" fill="#b45309">${northSetbackM.toFixed(2)}m</text>`;
+    // ⑦-a 정북일조제한선: 우리 필지 북향 에지에서 setback만큼 남쪽으로 평행이동
+    for (const [rA, rB] of restrictionSegs) {
+      const [ax, ay] = toSvg(rA[0], rA[1]);
+      const [bx, by] = toSvg(rB[0], rB[1]);
+      els += `<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#d97706" stroke-width="2" stroke-dasharray="6,3"/>`;
     }
+
+    // 라벨: 제한선 중간에 표시
+    const allRPts = restrictionSegs.flatMap(([rA, rB]) => [rA, rB]);
+    const rMidX   = allRPts.reduce((s, p) => s + p[0], 0) / allRPts.length;
+    const rMidY   = allRPts.reduce((s, p) => s + p[1], 0) / allRPts.length;
+    const [lmSvgX, lmSvgY] = toSvg(rMidX, rMidY + effectiveSetback * 0.4);
+    const lbl = `정북일조제한선 (h=${floorTopH.toFixed(1)}m → ${effectiveSetback.toFixed(2)}m)`;
+    els += `<rect x="${(lmSvgX - 78).toFixed(0)}" y="${(lmSvgY - 8).toFixed(0)}" width="156" height="10" fill="white" fill-opacity="0.85" rx="1"/>`;
+    els += `<text x="${lmSvgX.toFixed(0)}" y="${lmSvgY.toFixed(0)}" text-anchor="middle" font-size="6.5" fill="#b45309">${lbl}</text>`;
+
+    // ⑦-b 치수선: 인접대지경계선(우리 필지 북단) → 정북일조제한선
+    const northFacingMaxY = northFacingEdges.length > 0
+      ? Math.max(...northFacingEdges.flatMap(([A, B]) => [A[1], B[1]]))
+      : parcelBox.maxY;
+    const dimRefY   = northFacingMaxY;
+    const dimLimitY = northFacingMaxY - effectiveSetback;
+    const [, dimRefSvgY  ] = toSvg(0, dimRefY);
+    const [, dimLimitSvgY] = toSvg(0, dimLimitY);
+    const [dimSvgXbase,  ] = toSvg(parcelBox.minX, 0);
+    const dimX = Math.max(8, dimSvgXbase - 16);
+
+    els += `<line x1="${dimX}" y1="${dimRefSvgY.toFixed(1)}" x2="${dimX}" y2="${dimLimitSvgY.toFixed(1)}" stroke="#d97706" stroke-width="0.8" stroke-dasharray="2,2"/>`;
+    els += `<line x1="${(dimX-3).toFixed(0)}" y1="${dimRefSvgY.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${dimRefSvgY.toFixed(1)}" stroke="#d97706" stroke-width="1.2"/>`;
+    els += `<line x1="${(dimX-3).toFixed(0)}" y1="${dimLimitSvgY.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${dimLimitSvgY.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
+    const midDimSvgY = ((dimRefSvgY + dimLimitSvgY) / 2).toFixed(0);
+    els += `<rect x="${(dimX - 21).toFixed(0)}" y="${(Number(midDimSvgY) - 8).toFixed(0)}" width="20" height="10" fill="white" fill-opacity="0.9" rx="1"/>`;
+    els += `<text x="${(dimX - 11).toFixed(0)}" y="${midDimSvgY}" text-anchor="middle" font-size="7" fill="#b45309">${effectiveSetback.toFixed(2)}m</text>`;
   }
 
   // 필지 경계 재드로우 (인접 필지 위에 덮어 선명하게) — 위계 1
@@ -773,7 +775,7 @@ function buildFloorSvg(
     const legendItems: { fill: string; stroke: string; dash: string; label: string }[] = [
       { fill: '#fefce8', stroke: '#6b7280', dash: '4,2', label: '대지경계선' },
       { fill: '#eff6ff', stroke: '#93c5fd', dash: '3,2', label: '건축가능영역' },
-      ...(!is공동주택 ? [{ fill: '#fef3c7', stroke: '#d97706', dash: '', label: '정북이격대' }] : []),
+      ...(effectiveSetback > 0 ? [{ fill: '#fef3c7', stroke: '#d97706', dash: '', label: '정북이격대' }] : []),
       ...(allNearby.some(a => a.jimok !== '도') ? [{ fill: '#f1f5f9', stroke: '#cbd5e1', dash: '', label: '주변대지' }] : []),
       ...(allNearby.some(a => a.jimok === '도') ? [{ fill: '#e5e7eb', stroke: '#cbd5e1', dash: '', label: '도로' }] : []),
     ];
@@ -906,8 +908,11 @@ function buildNorthSectionSvg(
   roadOffset: number,
 ): string {
   const totalH = 층수 * 층고;
-  const is공동주택 = ["아파트","연립주택","다세대주택","기숙사"].some(k => 용도.includes(k));
-  const applyNorth = !is공동주택 && (!용도지역 || 용도지역.includes("전용주거") || 용도지역.includes("일반주거"));
+  const is채광공동주택 = ["아파트","연립주택","기숙사"].some(k => 용도.includes(k));
+  const hasNorthRoadSection = roadOffset > 0.5;
+  // §86①: 비공동주택 + 북측이 도로 아닌 경우 + 주거지역
+  const applyNorth = !is채광공동주택 && !hasNorthRoadSection
+    && (!용도지역 || 용도지역.includes("전용주거") || 용도지역.includes("일반주거"));
 
   const W = 400, H = 270;
   const PAD_L = 52, PAD_R = 18, PAD_T = 36, PAD_B = 42;
@@ -1022,7 +1027,11 @@ function buildNorthSectionSvg(
 
   // 공동주택 / 비주거 안내
   if (!applyNorth) {
-    const note = is공동주택 ? "공동주택: 채광기준(§61②) 적용" : `정북일조 미적용 (${용도지역 || '용도지역 미입력'})`;
+    const note = is채광공동주택
+      ? "공동주택(아파트·연립): 채광기준(§86③) 적용 — 정북일조(§86①) 비적용"
+      : hasNorthRoadSection
+        ? "북측이 도로 — 도로는 인접대지경계선 아님, 정북일조(§86①) 비적용"
+        : `정북일조 미적용 (${용도지역 || '용도지역 미입력'})`;
     els += `<rect x="${PAD_L+4}" y="${PAD_T+4}" width="${plotW-8}" height="22" fill="#fef9c3" fill-opacity="0.85" rx="3"/>`;
     els += `<text x="${PAD_L + plotW/2}" y="${PAD_T+18}" text-anchor="middle" font-size="8.5" fill="#92400e">${note}</text>`;
   }
@@ -1196,14 +1205,16 @@ export async function POST(req: NextRequest) {
   );
 
   // 용적률 상한 적용: 아래층부터 채우고 남은 용량만 위층에 배분
+  // 용적률 cap: 비례 배분 방식
+  // 아래 층부터 채우면 상위 층(정북이격으로 이미 작아진 층)이 0이 되는 문제 방지
   const 최대연면적cap = input.최대연면적 ?? input.대지면적 * (input.용적률 / 100);
-  let 누적연면적 = 0;
-  const floors = floorResults.map((r, i) => {
-    const 남은용량 = 최대연면적cap - 누적연면적;
-    const cappedArea = Math.max(0, Math.min(r.area, 남은용량));
-    누적연면적 += cappedArea;
-    return { floor: i + 1, area: parseFloat(cappedArea.toFixed(2)), svg: r.svg };
-  });
+  const rawTotal = floorResults.reduce((s, r) => s + r.area, 0);
+  const scaleFactor = rawTotal > 0 && rawTotal > 최대연면적cap ? 최대연면적cap / rawTotal : 1;
+  const floors = floorResults.map((r, i) => ({
+    floor: i + 1,
+    area: parseFloat((r.area * scaleFactor).toFixed(2)),
+    svg: r.svg,
+  }));
   const gltfJson = buildHyparJson(input, 가로, 세로, 층고);
   const dxf      = buildDxf(input, 가로, 세로, 층고);
 
