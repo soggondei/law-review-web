@@ -339,7 +339,7 @@ function buildFloorSvg(
   층고: number,
   parcelPts: [number, number][] | null,
   adjParcelsRaw: AdjacentParcel[] = [],
-): { svg: string; area: number; _northDist: number; _bldgDepth: number; _parcelDepth: number; _roadOffset: number; _northRef: number } {
+): { svg: string; area: number; _northDist: number; _bldgDepth: number; _parcelDepth: number; _roadOffset: number; _northRef: number; _trueRoadWidth: number } {
   const W = 400, H = 360;
   const floorBottomH = floorIdx * 층고;
   const floorTopH    = (floorIdx + 1) * 층고;
@@ -416,11 +416,62 @@ function buildFloorSvg(
     return apW > apD * 2.5 && apD < 12;
   });
 
+  // ── 우리 필지 주요 북향 엣지 탐지 (도로 폭 계산 기준) ─────────────────────
+  // CCW 폴리곤에서 westward 엣지(북향 외향법선) 중 가장 긴 것을 주요 북측 경계로 사용
+  const ccwParcelPre = signedArea2D(parcel) > 0 ? parcel : [...parcel].reverse();
+  let mainNorthEdge: { A: [number,number]; B: [number,number]; len: number; midX: number; avgY: number } | null = null;
+  for (let i = 0; i < ccwParcelPre.length; i++) {
+    const A = ccwParcelPre[i] as [number,number], B = ccwParcelPre[(i+1) % ccwParcelPre.length] as [number,number];
+    const len = Math.hypot(B[0]-A[0], B[1]-A[1]);
+    if (len < 0.5) continue;
+    if ((A[0]-B[0])/len > 0.15) {
+      if (!mainNorthEdge || len > mainNorthEdge.len) {
+        mainNorthEdge = { A, B, len,
+          midX: (A[0]+B[0])/2,
+          avgY: (A[1]+B[1])/2,
+        };
+      }
+    }
+  }
+  const lotMainNorthY   = mainNorthEdge?.avgY  ?? parcelBox.maxY;
+  const lotMainNorthXMin = mainNorthEdge ? Math.min(mainNorthEdge.A[0], mainNorthEdge.B[0]) : parcelBox.minX;
+  const lotMainNorthXMax = mainNorthEdge ? Math.max(mainNorthEdge.A[0], mainNorthEdge.B[0]) : parcelBox.maxX;
+  const lotMainNorthMidX = mainNorthEdge?.midX ?? (parcelBox.minX + parcelBox.maxX) / 2;
+
   // ── northRef 결정: 실제 인접대지경계선 ──────────────────────────────────────
   let northRef: number;
   {
     if (northRoad) {
-      northRef = bboxOf(northRoad.polygon).maxY;
+      // 도로 폴리곤의 EW 방향 북향 엣지 중 우리 필지 북향 주엣지 X 범위와 겹치는 것의
+      // 우리 필지 midX 위치 interpolated Y → 실제 도로 북단 위치
+      const ccwR = signedArea2D(northRoad.polygon) > 0 ? northRoad.polygon : [...northRoad.polygon].reverse();
+      const candidates: number[] = [];
+      for (let i = 0; i < ccwR.length; i++) {
+        const A = ccwR[i] as [number,number], B = ccwR[(i+1)%ccwR.length] as [number,number];
+        const len = Math.hypot(B[0]-A[0], B[1]-A[1]);
+        if (len < 0.5) continue;
+        const dx = B[0]-A[0], dy = B[1]-A[1];
+        if ((A[0]-B[0])/len <= 0.15) continue;  // 북향 아님
+        if (Math.abs(dx) < Math.abs(dy)) continue; // NS 위주 엣지 제외 (도로 동서 측면)
+        const sXMin = Math.min(A[0], B[0]);
+        const sXMax = Math.max(A[0], B[0]);
+        if (sXMax < lotMainNorthXMin - 1 || sXMin > lotMainNorthXMax + 1) continue;
+        // 우리 필지 midX에서 Y 보간 (clamp to segment range)
+        const cX = Math.max(sXMin, Math.min(sXMax, lotMainNorthMidX));
+        const t = sXMax > sXMin ? (cX - A[0]) / (B[0] - A[0]) : 0.5;
+        const yHere = A[1] + t * (B[1] - A[1]);
+        if (yHere > lotMainNorthY + 0.3) candidates.push(yHere); // 우리 필지 북단보다 북쪽이어야 함
+      }
+      if (candidates.length > 0) {
+        // 도로 북단 = 가장 가까운(낮은) 북측 경계 Y
+        const roadNorthY = Math.min(...candidates);
+        // northRef: 도로 폭을 parcelBox.maxY 기준으로 환산
+        // roadWidth = roadNorthY - lotMainNorthY, roadOffset = roadWidth - (parcelBox.maxY - lotMainNorthY)는 음수가 될 수 있음
+        // → northRef = roadNorthY, roadOffset = roadNorthY - parcelBox.maxY
+        northRef = roadNorthY;
+      } else {
+        northRef = bboxOf(northRoad.polygon).maxY; // fallback
+      }
     } else {
       const directCands = northAdj.filter(ap => bboxOf(ap.polygon).minY <= parcelBox.maxY + adjTol);
       if (directCands.length > 0) {
@@ -432,7 +483,10 @@ function buildFloorSvg(
       }
     }
   }
-  const roadOffset = northRef - parcelBox.maxY; // 도로 폭 (0이면 도로 없음)
+  // roadOffset: northRef(도로 북단)에서 parcelBox.maxY(필지 bbox 북단)까지의 거리
+  // ※ 도로 폭(§86⑥용) = northRef - lotMainNorthY (실제 주요 북향 엣지 기준)
+  const roadOffset = northRef - parcelBox.maxY;
+  const trueRoadWidth = Math.max(0, northRef - lotMainNorthY); // §86⑥ 실제 도로 폭
 
   // ── 인접대지경계선 세그먼트: 도로 북단 실제 경계선 형상 ───────────────────────
   // northRoad 폴리곤의 북향 엣지를 추출해 실제 경계선 형상을 그대로 사용
@@ -584,19 +638,19 @@ function buildFloorSvg(
   //              → 우리 필지 내 이격 = max(0, setback - roadOffset)
   //   공동주택:  인접대지경계선 = 우리 필지 북단 + roadOffset/2 (도로 중심선)
   //              → 채광 setback = 높이/2, 우리 필지 내 이격 = max(0, 높이/2 - roadOffset/2)
-  const hasNorthRoad = northRoad !== undefined && roadOffset > 0.5;
+  const hasNorthRoad = northRoad !== undefined && trueRoadWidth > 0.5;
   const is채광공동주택 = ["아파트","연립주택","기숙사"].some(k => input.용도.includes(k));
 
   const effectiveSetback: number = (() => {
     if (is채광공동주택) {
       // §86③ 채광기준: 높이 ≤ 인접대지경계선까지 거리 × 2
-      // → 우리 필지에서의 이격 = max(0, 높이/2 - roadOffset/2)
-      const refDist = hasNorthRoad ? roadOffset / 2 : 0;
+      // → 우리 필지에서의 이격 = max(0, 높이/2 - trueRoadWidth/2)
+      const refDist = hasNorthRoad ? trueRoadWidth / 2 : 0;
       return Math.max(0, floorTopH / 2 - refDist);
     }
     // §86①: 비공동주택 + 다세대주택
-    // 기준선이 도로 반대편(+roadOffset)으로 이동 → 우리 필지 이격 차감
-    return Math.max(0, northSetbackM - roadOffset);
+    // 기준선이 도로 반대편(+trueRoadWidth)으로 이동 → 우리 필지 이격 차감
+    return Math.max(0, northSetbackM - trueRoadWidth);
   })();
 
   // 도로 중심선 Y (공동주택 §86③ 기준선 표시용)
@@ -846,6 +900,7 @@ function buildFloorSvg(
     _parcelDepth: parcelBox.maxY - parcelBox.minY,
     _roadOffset: roadOffset,
     _northRef: northRef,
+    _trueRoadWidth: trueRoadWidth,
   };
 }
 
@@ -1261,11 +1316,12 @@ export async function POST(req: NextRequest) {
   const floorMeta = floorResults.map(r => ({ northDist: r._northDist, bldgDepth: r._bldgDepth }));
   const f0 = floorResults[0];
   const parcelDepth = f0?._parcelDepth ?? Math.sqrt(input.대지면적);
-  const roadOffset  = f0?._roadOffset  ?? 0;
+  const roadOffset      = f0?._roadOffset      ?? 0;
+  const trueRoadWidth   = f0?._trueRoadWidth   ?? roadOffset;
 
   const northSectionSvg = buildNorthSectionSvg(
     input.층수, 층고, input.용도, input.용도지역,
-    floorMeta, parcelDepth, roadOffset,
+    floorMeta, parcelDepth, trueRoadWidth,
   );
 
   // 정북일조 영향층 (northDist가 1층보다 증가하기 시작하는 층)
@@ -1294,7 +1350,7 @@ export async function POST(req: NextRequest) {
       달성용적률,
       주차대수,
       정북영향층:  정북영향층 > 0 ? 정북영향층 : null,
-      northRoadOffset: roadOffset,  // §86⑥ 북측 도로 폭 (이격거리 표 계산용)
+      northRoadOffset: trueRoadWidth,  // §86⑥ 실제 도로 폭 (필지 북향 주엣지 기준)
       northSectionSvg,  // 단면도 SVG
     },
   });
