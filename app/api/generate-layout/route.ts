@@ -1275,6 +1275,7 @@ export async function POST(req: NextRequest) {
       달성용적률,
       주차대수,
       정북영향층:  정북영향층 > 0 ? 정북영향층 : null,
+      northRoadOffset: roadOffset,  // §86⑥ 북측 도로 폭 (이격거리 표 계산용)
       northSectionSvg,  // 단면도 SVG
     },
   });

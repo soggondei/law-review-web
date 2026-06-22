@@ -14,6 +14,7 @@ interface Stats {
   달성용적률?: number;
   주차대수?: number;
   정북영향층?: number | null;
+  northRoadOffset?: number;
   northSectionSvg?: string;
 }
 
@@ -169,9 +170,12 @@ export default function MassStudyViewer({ floors, stats }: { floors: FloorData[]
                 <div className="border border-gray-200 rounded-xl overflow-hidden flex flex-col" style={{ height: 420 }}>
                   <div className="bg-slate-50 px-2 py-1.5 border-b border-gray-200">
                     <div className="text-[10px] font-semibold text-slate-700">정북일조 이격거리</div>
-                    <div className="text-[8px] text-slate-400">건축법시행령 §86① (9m 기준)</div>
+                    <div className="text-[8px] text-slate-400">건축법시행령 §86① (10m 기준)</div>
                     {stats.용도지역 && (
                       <div className="text-[8px] text-blue-500 mt-0.5 truncate">{stats.용도지역}</div>
+                    )}
+                    {(stats.northRoadOffset ?? 0) > 0.5 && (
+                      <div className="text-[8px] text-emerald-600 mt-0.5">§86⑥ 북측도로 {(stats.northRoadOffset ?? 0).toFixed(1)}m 적용</div>
                     )}
                   </div>
 
@@ -197,8 +201,11 @@ export default function MassStudyViewer({ floors, stats }: { floors: FloorData[]
                         <tbody>
                           {Array.from({ length: stats.층수 }, (_, fi) => {
                             const topH = (fi + 1) * stats.층고;
-                            // §86① 원문: 9m 이하 → 1.5m, 9m 초과 → 높이/2
-                            const setback = topH <= 9 ? 1.5 : topH / 2;
+                            // §86①: 높이 10m 이하 → 1.5m, 10m 초과 → 높이/2
+                            const rawSetback = topH <= 10 ? 1.5 : topH / 2;
+                            // §86⑥: 북측 도로가 있으면 이격거리 = max(0, rawSetback - roadOffset)
+                            const roadOff = stats.northRoadOffset ?? 0;
+                            const setback = Math.max(0, rawSetback - roadOff);
                             const isCurrent = fi === activeFloor;
                             const isWarn = setback > 1.5;
                             const isImpact = stats.정북영향층 != null && fi + 1 >= stats.정북영향층;
@@ -215,7 +222,7 @@ export default function MassStudyViewer({ floors, stats }: { floors: FloorData[]
                                   {topH.toFixed(1)}m
                                 </td>
                                 <td className={`px-2 py-1 text-center font-semibold ${isCurrent ? "text-blue-700" : isWarn ? "text-amber-600" : "text-gray-700"}`}>
-                                  {setback.toFixed(2)}m
+                                  {setback === 0 ? <span className="text-emerald-600">–</span> : `${setback.toFixed(2)}m`}
                                 </td>
                               </tr>
                             );
@@ -225,9 +232,9 @@ export default function MassStudyViewer({ floors, stats }: { floors: FloorData[]
                     </div>
                   )}
                   <div className="px-2 py-1.5 bg-slate-50 border-t border-gray-100 text-[8px] text-slate-400 space-y-0.5">
-                    <div>* 9m 이하: 1.5m 이상</div>
-                    <div>* 9m 초과: 높이×1/2</div>
-                    <div>* 북측 도로시: 반대편 경계선 기준</div>
+                    <div>* 10m 이하: 1.5m 이상 (§86①)</div>
+                    <div>* 10m 초과: 높이×1/2 (§86①)</div>
+                    <div>* 북측 도로시: 도로폭 차감 (§86⑥)</div>
                   </div>
                 </div>
               ) : (
