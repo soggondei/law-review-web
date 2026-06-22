@@ -381,27 +381,35 @@ function buildFloorSvg(
     });
 
   // ── 주변 필지 전체 수집 (표시 + 정북일조 기준 탐지용) ──────────────────────
+  const parcelW = parcelBox.maxX - parcelBox.minX;
+  const parcelD = parcelBox.maxY - parcelBox.minY;
+  const adjTol  = Math.max(2, parcelD * 0.08);
+
   // 북쪽 30m, 동서남 15m 이내 X축 겹침 필지 (도로 건너편 포함)
-  const adjTol = Math.max(2, (parcelBox.maxY - parcelBox.minY) * 0.08);
   const allNearby = adjParcels.filter(ap => {
     const ab = bboxOf(ap.polygon);
     const xOv = Math.min(ab.maxX, parcelBox.maxX + 15) - Math.max(ab.minX, parcelBox.minX - 15);
     return xOv > 0 && ab.minY < parcelBox.maxY + 30 && ab.maxY > parcelBox.minY - 15;
   });
 
-  // northAdj: 북쪽 관련 필지 — maxY 기준 (도로가 남쪽으로 뻗어도 포함)
-  // 기존 minY 기준은 도로 폴리곤이 남쪽으로 크게 뻗을 경우 제외됨 → maxY 기준으로 전환
+  // northAdj: 북쪽 관련 필지 — 광역 행정/도로망 폴리곤 제외
+  // bbox 면적이 우리 필지 추정 면적의 150배 이상이면 광역 폴리곤으로 간주
+  const parcelEstArea = parcelW * parcelD;
   const northAdj = allNearby.filter(ap => {
     const ab = bboxOf(ap.polygon);
+    const apBboxArea = (ab.maxX - ab.minX) * (ab.maxY - ab.minY);
+    if (apBboxArea > parcelEstArea * 150) return false; // 광역 폴리곤 제외
     const xOv = Math.min(ab.maxX, parcelBox.maxX + adjTol) - Math.max(ab.minX, parcelBox.minX - adjTol);
     return xOv > 0.5 && ab.maxY > parcelBox.maxY + 0.5 && ab.minY < parcelBox.maxY + 30;
   }).sort((a, b) => bboxOf(a.polygon).minY - bboxOf(b.polygon).minY);
 
-  // 도로 필지 탐지: jimok='도' 또는 동서 방향으로 길고 좁은 띠 (너비>깊이×2.5, 깊이<10m)
+  // 도로 필지 탐지: jimok='도' 또는 동서 방향으로 길고 좁은 띠(깊이<12m)
   const northRoad = northAdj.find(ap => {
     if (ap.jimok === '도') return true;
     const ab = bboxOf(ap.polygon);
-    return (ab.maxX - ab.minX) > (ab.maxY - ab.minY) * 2.5 && (ab.maxY - ab.minY) < 10;
+    const apW = ab.maxX - ab.minX;
+    const apD = ab.maxY - ab.minY;
+    return apW > apD * 2.5 && apD < 12;
   });
 
   // ── northRef 결정: 실제 인접대지경계선 ──────────────────────────────────────
