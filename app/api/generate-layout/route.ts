@@ -392,13 +392,15 @@ function buildFloorSvg(
     return xOv > 0 && ab.minY < parcelBox.maxY + 30 && ab.maxY > parcelBox.minY - 15;
   });
 
-  // northAdj: 북쪽 관련 필지 — 광역 행정/도로망 폴리곤 제외
-  // bbox 면적이 우리 필지 추정 면적의 150배 이상이면 광역 폴리곤으로 간주
+  // northAdj: 북쪽 관련 필지 — 광역/복잡 도로망 폴리곤 두 조건으로 제외
   const parcelEstArea = parcelW * parcelD;
   const northAdj = allNearby.filter(ap => {
     const ab = bboxOf(ap.polygon);
     const apBboxArea = (ab.maxX - ab.minX) * (ab.maxY - ab.minY);
-    if (apBboxArea > parcelEstArea * 150) return false; // 광역 폴리곤 제외
+    // ① bbox 면적이 필지 면적 80배 초과: 광역 도로망/행정 폴리곤
+    if (apBboxArea > parcelEstArea * 80) return false;
+    // ② 폴리곤 하단이 우리 필지 남단에서 2×parcelD 이상 남쪽: 복잡 커브 도로 폴리곤
+    if (ab.minY < parcelBox.minY - parcelD * 2) return false;
     const xOv = Math.min(ab.maxX, parcelBox.maxX + adjTol) - Math.max(ab.minX, parcelBox.minX - adjTol);
     return xOv > 0.5 && ab.maxY > parcelBox.maxY + 0.5 && ab.minY < parcelBox.maxY + 30;
   }).sort((a, b) => bboxOf(a.polygon).minY - bboxOf(b.polygon).minY);
@@ -582,10 +584,14 @@ function buildFloorSvg(
     [B[0], B[1] - northSetbackM],
   ] as [[number,number],[number,number]]);
 
-  // 건물 북단 한계: 제한선의 최소 Y (가장 제약적인 지점 기준, 보수적)
-  const bldgNorthLimit = restrictionSegs.length > 0
-    ? Math.min(...restrictionSegs.flatMap(([rA, rB]) => [rA[1], rB[1]]))
-    : northRef - northSetbackM;
+  // 건물 북단 한계 (건폐율 한도선)
+  // 도로가 있을 때: §86② — northRef(도로 반대편 경계선)에서 직접 이격 (도로 폴리곤 커브 엣지로 인한 오류 방지)
+  // 도로 없을 때: restrictionSegs 최소 Y (우리 북향 엣지 기준)
+  const bldgNorthLimit = northRoad
+    ? northRef - northSetbackM
+    : restrictionSegs.length > 0
+      ? Math.min(...restrictionSegs.flatMap(([rA, rB]) => [rA[1], rB[1]]))
+      : northRef - northSetbackM;
 
   const northLimit = Math.max(bzMinY + EPS, Math.min(bldgNorthLimit, bzMaxY - EPS));
   const bestRes = findMaxRect(bzMinY, northLimit);
@@ -1172,12 +1178,20 @@ export async function POST(req: NextRequest) {
     buildFloorSvg(i, input, 가로, 세로, 층고, parcelPts, adjParcels)
   );
 
-  const floors = floorResults.map((r, i) => ({ floor: i + 1, area: r.area, svg: r.svg }));
+  // 용적률 상한 적용: 아래층부터 채우고 남은 용량만 위층에 배분
+  const 최대연면적cap = input.최대연면적 ?? input.대지면적 * (input.용적률 / 100);
+  let 누적연면적 = 0;
+  const floors = floorResults.map((r, i) => {
+    const 남은용량 = 최대연면적cap - 누적연면적;
+    const cappedArea = Math.max(0, Math.min(r.area, 남은용량));
+    누적연면적 += cappedArea;
+    return { floor: i + 1, area: parseFloat(cappedArea.toFixed(2)), svg: r.svg };
+  });
   const gltfJson = buildHyparJson(input, 가로, 세로, 층고);
   const dxf      = buildDxf(input, 가로, 세로, 층고);
 
-  const 연면적     = floorResults.reduce((s, f) => s + f.area, 0);
-  const 건축면적실  = floorResults[0]?.area ?? 건축면적목표;
+  const 연면적     = floors.reduce((s, f) => s + f.area, 0);
+  const 건축면적실  = floors[0]?.area ?? 건축면적목표;
 
   // 단면도 데이터 (층별 northDist, bldgDepth)
   const floorMeta = floorResults.map(r => ({ northDist: r._northDist, bldgDepth: r._bldgDepth }));
