@@ -922,11 +922,13 @@ function buildNorthSectionSvg(
 ): string {
   const totalH = 층수 * 층고;
   const is채광공동주택 = ["아파트","연립주택","기숙사"].some(k => 용도.includes(k));
-  const hasNorthRoadSection = roadOffset > 0.5;
   // §86⑥: 도로가 있어도 비적용이 아님 — 기준선이 이동할 뿐
   // 비공동주택: applyNorth = true (도로 폭만큼 effectiveSetback 차감)
   // 공동주택: 채광기준 적용
   const applyNorth = !용도지역 || 용도지역.includes("전용주거") || 용도지역.includes("일반주거");
+  // §86①+§86⑥ 단면도용 실효이격 (치수선 표시 여부 판단)
+  const secNorthSetback = (!applyNorth || is채광공동주택) ? 0 : (totalH <= 10 ? 1.5 : totalH / 2);
+  const secEffectiveSetback = Math.max(0, secNorthSetback - roadOffset);
 
   const W = 400, H = 270;
   const PAD_L = 52, PAD_R = 18, PAD_T = 36, PAD_B = 42;
@@ -1025,7 +1027,7 @@ function buildNorthSectionSvg(
   }
 
   // 치수: 최상층 정북이격
-  if (applyNorth && !is채광공동주택 && floorMeta.length > 0) {
+  if (applyNorth && !is채광공동주택 && secEffectiveSetback > 0 && floorMeta.length > 0) {
     const topMeta = floorMeta[floorMeta.length - 1];
     const topH = 층수 * 층고;
     const reqSetback = topH <= 10 ? 1.5 : topH / 2;
@@ -1222,11 +1224,14 @@ export async function POST(req: NextRequest) {
   const 최대연면적cap = input.최대연면적 ?? input.대지면적 * (input.용적률 / 100);
   const rawTotal = floorResults.reduce((s, r) => s + r.area, 0);
   const scaleFactor = rawTotal > 0 && rawTotal > 최대연면적cap ? 최대연면적cap / rawTotal : 1;
-  const floors = floorResults.map((r, i) => ({
-    floor: i + 1,
-    area: parseFloat((r.area * scaleFactor).toFixed(2)),
-    svg: r.svg,
-  }));
+  const floors = floorResults.map((r, i) => {
+    const cappedArea = parseFloat((r.area * scaleFactor).toFixed(2));
+    // SVG 내부 면적 텍스트를 cappedArea로 교체 (rawArea와 불일치 방지)
+    const svg = scaleFactor < 0.999
+      ? r.svg.replace(`${r.area.toFixed(1)} ㎡`, `${cappedArea.toFixed(1)} ㎡`)
+      : r.svg;
+    return { floor: i + 1, area: cappedArea, svg };
+  });
   const gltfJson = buildHyparJson(input, 가로, 세로, 층고);
   const dxf      = buildDxf(input, 가로, 세로, 층고);
 
