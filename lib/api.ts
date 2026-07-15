@@ -321,6 +321,36 @@ export function getSeoulOrdinance(zoneName: string) {
   return ORDINANCES["서울특별시"]?.[zoneName] ?? null;
 }
 
+// ── 토지대장 (소유구분·지목·면적) ─────────────────────────────────────────────
+export async function fetchLandRegistry(pnu: string) {
+  const url = `https://api.vworld.kr/ned/data/ladfrlList?key=${LURIS_KEY}&pnu=${pnu}&numOfRows=1&pageNo=1`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  const body = await res.json();
+  const item = body?.ladfrlList?.field ?? body?.ladfrlVOList?.ladfrlVO;
+  const it = Array.isArray(item) ? item[0] : item;
+  if (!it) return null;
+  return {
+    지목: it.lndcgrCodeNm ?? it.jimok ?? null,
+    면적: it.lndpclAr ?? it.area ?? null,
+    소유구분: it.posesnSeCodeNm ?? it.ownerType ?? null,
+  };
+}
+
+// ── 개별공시지가 ──────────────────────────────────────────────────────────────
+export async function fetchLandPrice(pnu: string, year?: string) {
+  const stdrYear = year ?? new Date().getFullYear().toString();
+  const url = `https://api.vworld.kr/ned/data/getIndvdLandPriceAttr?key=${LURIS_KEY}&pnu=${pnu}&stdrYear=${stdrYear}&numOfRows=1&pageNo=1`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  const body = await res.json();
+  const item = body?.indvdLandPriceAttr?.field ?? body?.indvdLandPriceVOList?.indvdLandPriceVO;
+  const it = Array.isArray(item) ? item[0] : item;
+  if (!it) return null;
+  return {
+    기준연도: it.stdrYear ?? stdrYear,
+    공시지가: it.pblntfPclnd ?? it.landPrice ?? null, // 원/㎡
+  };
+}
+
 // ── 건축물대장 층별개요 ────────────────────────────────────────────────────────
 export type BuildingFloor = {
   층: string;

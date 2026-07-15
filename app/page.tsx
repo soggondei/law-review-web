@@ -28,6 +28,8 @@ const LandUseMap = dynamic(() => import("@/components/LandUseMap"), {
   ),
 });
 
+const LandUsePlanPanel = dynamic(() => import("@/components/LandUsePlanPanel"), { ssr: false });
+
 const PdfExtractPanel = dynamic(() => import("@/components/PdfExtractPanel"), { ssr: false });
 
 const MassStudyViewer = dynamic(() => import("@/components/MassStudyViewer"), { ssr: false });
@@ -521,12 +523,14 @@ export default function Home() {
     if (!r?.coords?.lat || !r?.coords?.lng) return;
     setCadLoading(true);
     try {
-      const params = new URLSearchParams({
+      const cadParams: Record<string, string> = {
         lat: String(r.coords.lat),
         lng: String(r.coords.lng),
         addr: address,
         radius: String(cadRadius),
-      });
+      };
+      if (r.addrInfo?.pnu) cadParams.pnu = r.addrInfo.pnu;
+      const params = new URLSearchParams(cadParams);
       const res = await fetch(`/api/cadexport?${params}`);
       if (!res.ok) { alert("CAD 생성 실패"); return; }
       const blob = await res.blob();
@@ -1474,6 +1478,7 @@ export default function Home() {
                     ))}
                     <span className="text-[10px] text-gray-400 ml-1">· 빨간 원: 학교환경보호구역</span>
                   </div>
+                  <LandUsePlanPanel address={address} />
                 </div>
               )}
             </Accordion>
