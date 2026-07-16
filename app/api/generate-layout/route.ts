@@ -667,6 +667,10 @@ function buildFloorSvg(
         [B[0], B[1] - effectiveSetback],
       ] as [[number,number],[number,number]])
     : [];
+  // 기준선 라벨 Y (SVG 좌표) — 정북제한선 라벨 겹침 방지용
+  const _northBaseAllPts = northFacingBase.flatMap(([A, B]) => [A, B]);
+  const _northBaseMidY   = _northBaseAllPts.reduce((s, p) => s + p[1], 0) / _northBaseAllPts.length;
+  const [, northEdgeSvgY] = toSvg(0, _northBaseMidY);
 
   // 건물 북단 한계: 이격 없으면 필지 북단까지 (BASE_SB 인셋이 실제 한계)
   const bldgNorthLimit = restrictionSegs.length > 0
@@ -807,7 +811,9 @@ function buildFloorSvg(
     const allRPts = restrictionSegs.flatMap(([rA, rB]) => [rA, rB]);
     const rMidX   = allRPts.reduce((s, p) => s + p[0], 0) / allRPts.length;
     const rMidY   = allRPts.reduce((s, p) => s + p[1], 0) / allRPts.length;
-    const [lmSvgX, lmSvgY] = toSvg(rMidX, rMidY + effectiveSetback * 0.4);
+    const [lmSvgX, lmSvgYraw] = toSvg(rMidX, rMidY + effectiveSetback * 0.4);
+    // 기준선 라벨(northEdgeSvgY) 아래로 최소 12px 확보
+    const lmSvgY = Math.max(lmSvgYraw, northEdgeSvgY + 12);
     const rlbl = is채광공동주택
       ? `채광제한선 §86③ (${effectiveSetback.toFixed(2)}m)`
       : `정북제한선 §86① (${effectiveSetback.toFixed(2)}m)`;
