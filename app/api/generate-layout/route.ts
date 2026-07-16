@@ -1072,6 +1072,15 @@ function buildNorthSectionSvg(
     els += `<line x1="${roadSX.toFixed(1)}" y1="${lineTop}" x2="${roadSX.toFixed(1)}" y2="${lineBot.toFixed(1)}" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="4,2"/>`;
   }
 
+  // ── 공동주택 / 비주거 안내 (레이블 이전에 그려 레이블이 배너 위에 표시되도록) ──
+  if (!applyNorth || is채광공동주택) {
+    const note = is채광공동주택
+      ? "공동주택: 채광기준(§86③) 적용 — 정북일조(§86①) 비적용"
+      : `정북일조 미적용 (${용도지역 || '미입력'})`;
+    els += `<rect x="${PAD_L+4}" y="${PAD_T+4}" width="${plotW-8}" height="20" fill="#fef9c3" fill-opacity="0.88" rx="3"/>`;
+    els += `<text x="${PAD_L+plotW/2}" y="${PAD_T+17}" text-anchor="middle" font-size="8" fill="#92400e">${note}</text>`;
+  }
+
   // ── 레이블 (흰 배경 + 가독성 개선) ─────────────────────────────────────
   const labelY1 = PAD_T + 12;  // 첫 번째 레이블 Y
   const labelY2 = PAD_T + 23;  // 두 번째 레이블 Y
@@ -1179,15 +1188,6 @@ function buildNorthSectionSvg(
       els += `<rect x="${(Number(midX)-26)}" y="${lblY-9}" width="52" height="12" fill="white" fill-opacity="0.95" rx="2"/>`;
       els += `<text x="${midX}" y="${lblY}" text-anchor="middle" font-size="7.5" fill="${color}">이격 ${secEffSetback.toFixed(2)}m</text>`;
     }
-  }
-
-  // ── 공동주택 / 비주거 안내 ────────────────────────────────────────────────
-  if (!applyNorth || is채광공동주택) {
-    const note = is채광공동주택
-      ? "공동주택: 채광기준(§86③) 적용 — 정북일조(§86①) 비적용"
-      : `정북일조 미적용 (${용도지역 || '미입력'})`;
-    els += `<rect x="${PAD_L+4}" y="${PAD_T+4}" width="${plotW-8}" height="20" fill="#fef9c3" fill-opacity="0.88" rx="3"/>`;
-    els += `<text x="${PAD_L+plotW/2}" y="${PAD_T+17}" text-anchor="middle" font-size="8" fill="#92400e">${note}</text>`;
   }
 
   // ── Y축 (높이) ────────────────────────────────────────────────────────────
