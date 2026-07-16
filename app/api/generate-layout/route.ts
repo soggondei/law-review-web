@@ -812,8 +812,8 @@ function buildFloorSvg(
     const rMidX   = allRPts.reduce((s, p) => s + p[0], 0) / allRPts.length;
     const rMidY   = allRPts.reduce((s, p) => s + p[1], 0) / allRPts.length;
     const [lmSvgX, lmSvgYraw] = toSvg(rMidX, rMidY + effectiveSetback * 0.4);
-    // 기준선 라벨(northEdgeSvgY) 아래로 최소 12px 확보
-    const lmSvgY = Math.max(lmSvgYraw, northEdgeSvgY + 12);
+    // 기준선 라벨(northEdgeSvgY) 아래로 최소 18px 확보 — 겹침 방지
+    const lmSvgY = Math.max(lmSvgYraw, northEdgeSvgY + 18);
     const rlbl = is채광공동주택
       ? `채광제한선 §86③ (${effectiveSetback.toFixed(2)}m)`
       : `정북제한선 §86① (${effectiveSetback.toFixed(2)}m)`;
