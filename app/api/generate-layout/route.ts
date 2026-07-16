@@ -719,14 +719,17 @@ function buildFloorSvg(
     const fill   = isRoad ? '#e5e7eb' : '#f1f5f9';
     els += `<polygon points="${ptStr(ap.polygon)}" fill="${fill}" fill-opacity="0.6" stroke="#cbd5e1" stroke-width="0.7"/>`;
   }
-  // 북측 필지 지목 라벨
+  // 북측 필지 지목 라벨 (흰 배경 + font-size 9)
   for (const ap of northAdj) {
     const ab = bboxOf(ap.polygon);
     if (ab.minY > parcelBox.maxY + northShow) continue;
     const isRoad = ap.jimok === '도';
     const labelY = Math.min((ab.minY + ab.maxY) / 2, parcelBox.maxY + northShow * 0.7);
     const [lax, lay] = toSvg((ab.minX + ab.maxX) / 2, labelY);
-    els += `<text x="${lax.toFixed(0)}" y="${(lay + 4).toFixed(0)}" text-anchor="middle" font-size="7" fill="${isRoad ? '#92400e' : '#64748b'}">${isRoad ? '도로' : (ap.jimok || '인접대지')}</text>`;
+    const lbl = isRoad ? '도로' : (ap.jimok || '인접대지');
+    const lw = lbl.length * 6.5 + 6;
+    els += `<rect x="${(lax - lw/2).toFixed(0)}" y="${(lay - 1).toFixed(0)}" width="${lw.toFixed(0)}" height="11" fill="white" fill-opacity="0.85" rx="2"/>`;
+    els += `<text x="${lax.toFixed(0)}" y="${(lay + 8).toFixed(0)}" text-anchor="middle" font-size="9" fill="${isRoad ? '#92400e' : '#475569'}">${lbl}</text>`;
   }
 
   // 기준선 표시
@@ -847,14 +850,14 @@ function buildFloorSvg(
       ...(allNearby.some(a => a.jimok !== '도') ? [{ fill: '#f1f5f9', stroke: '#cbd5e1', dash: '', label: '주변대지' }] : []),
       ...(allNearby.some(a => a.jimok === '도') ? [{ fill: '#e5e7eb', stroke: '#cbd5e1', dash: '', label: '도로' }] : []),
     ];
-    const itemWidths = legendItems.map(it => 10 + it.label.length * 5.5 + 8);
+    const itemWidths = legendItems.map(it => 10 + it.label.length * 6.5 + 8);
     const totalW = itemWidths.reduce((s, w) => s + w, 0);
     let lx = Math.max(8, (W - totalW) / 2);
     const LY2 = 30;
     for (let k = 0; k < legendItems.length; k++) {
       const { fill, stroke, dash, label } = legendItems[k];
-      els += `<rect x="${lx.toFixed(0)}" y="${LY2-8}" width="8" height="8" fill="${fill}" stroke="${stroke}" stroke-width="0.8" ${dash ? `stroke-dasharray="${dash}"` : ''}/>`;
-      els += `<text x="${(lx+10).toFixed(0)}" y="${LY2}" font-size="6.5" fill="#374151">${label}</text>`;
+      els += `<rect x="${lx.toFixed(0)}" y="${LY2-8}" width="9" height="9" fill="${fill}" stroke="${stroke}" stroke-width="0.8" ${dash ? `stroke-dasharray="${dash}"` : ''}/>`;
+      els += `<text x="${(lx+11).toFixed(0)}" y="${LY2}" font-size="7.5" fill="#374151">${label}</text>`;
       lx += itemWidths[k];
     }
   }
@@ -878,11 +881,12 @@ function buildFloorSvg(
   // 치수선 — 세로 (건물 깊이), 흰 배경 포함
   const [btr_x, btr_y] = toSvg(bMaxX, bMaxY);
   const [bbr2_x, bbr2_y] = toSvg(bMaxX, bMinY);
-  const dX = Math.max(btr_x, bbr2_x) + 14;
+  // dX를 SVG 경계 안으로 클램핑 (텍스트까지 포함해 W-16 이내)
+  const dX = Math.min(W - 32, Math.max(btr_x, bbr2_x) + 14);
   const dimMidY = (btr_y + bbr2_y) / 2;
   els += `<line x1="${dX.toFixed(0)}" y1="${btr_y.toFixed(1)}" x2="${dX.toFixed(0)}" y2="${bbr2_y.toFixed(1)}" stroke="#cbd5e1" stroke-width="0.8"/>`;
-  els += `<line x1="${(dX-3).toFixed(0)}" y1="${btr_y.toFixed(1)}" x2="${(dX+3).toFixed(0)}" y2="${btr_y.toFixed(1)}" stroke="#cbd5e1" stroke-width="0.8"/>`;
-  els += `<line x1="${(dX-3).toFixed(0)}" y1="${bbr2_y.toFixed(1)}" x2="${(dX+3).toFixed(0)}" y2="${bbr2_y.toFixed(1)}" stroke="#cbd5e1" stroke-width="0.8"/>`;
+  els += `<line x1="${(dX-4).toFixed(0)}" y1="${btr_y.toFixed(1)}" x2="${(dX+4).toFixed(0)}" y2="${btr_y.toFixed(1)}" stroke="#cbd5e1" stroke-width="1"/>`;
+  els += `<line x1="${(dX-4).toFixed(0)}" y1="${bbr2_y.toFixed(1)}" x2="${(dX+4).toFixed(0)}" y2="${bbr2_y.toFixed(1)}" stroke="#cbd5e1" stroke-width="1"/>`;
   els += `<rect x="${(dX+2).toFixed(0)}" y="${(dimMidY-6).toFixed(0)}" width="26" height="11" fill="white" fill-opacity="0.9" rx="1"/>`;
   els += `<text x="${(dX+15).toFixed(0)}" y="${(dimMidY+3).toFixed(0)}" text-anchor="middle" font-size="8.5" fill="#64748b">${fH.toFixed(1)}m</text>`;
 
@@ -1052,25 +1056,28 @@ function buildNorthSectionSvg(
     els += `<line x1="${roadSX.toFixed(1)}" y1="${lineTop}" x2="${roadSX.toFixed(1)}" y2="${lineBot.toFixed(1)}" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="4,2"/>`;
   }
 
-  // ── 레이블 (각 선 안쪽 또는 배경 위에 표시, 겹침 방지) ───────────────────
-  const labelY1 = PAD_T + 10;  // 첫 번째 레이블 Y
-  const labelY2 = PAD_T + 20;  // 두 번째 레이블 Y
+  // ── 레이블 (흰 배경 + 가독성 개선) ─────────────────────────────────────
+  const labelY1 = PAD_T + 12;  // 첫 번째 레이블 Y
+  const labelY2 = PAD_T + 23;  // 두 번째 레이블 Y
 
-  // 인접대지경계선 레이블: 도로 내부 중간에 표시
   if (trueRoadWidth > 0.5) {
     const roadMidX = sx(-trueRoadWidth / 2);
-    // 도로 폭 텍스트 (지면선 아래)
-    els += `<text x="${roadMidX.toFixed(0)}" y="${(groundY + 11).toFixed(0)}" text-anchor="middle" font-size="7" fill="#6b7280">도로</text>`;
-    els += `<text x="${roadMidX.toFixed(0)}" y="${(groundY + 20).toFixed(0)}" text-anchor="middle" font-size="7" fill="#6b7280">${trueRoadWidth.toFixed(1)}m</text>`;
-    // 인접대지경계선 레이블: adjX 오른쪽에 작게
-    els += `<text x="${(adjX + 3).toFixed(0)}" y="${labelY1}" font-size="6" fill="#b45309">인접대지경계선</text>`;
-    els += `<text x="${(adjX + 3).toFixed(0)}" y="${labelY2}" font-size="6" fill="#b45309">(§86⑥)</text>`;
-    // 도로 남단 레이블: 필지 북단
+    // 도로 폭 텍스트 (지면선 아래, 흰 배경)
+    els += `<rect x="${(roadMidX - 16).toFixed(0)}" y="${(groundY + 3).toFixed(0)}" width="32" height="22" fill="white" fill-opacity="0.9" rx="2"/>`;
+    els += `<text x="${roadMidX.toFixed(0)}" y="${(groundY + 13).toFixed(0)}" text-anchor="middle" font-size="8" fill="#6b7280">도로</text>`;
+    els += `<text x="${roadMidX.toFixed(0)}" y="${(groundY + 23).toFixed(0)}" text-anchor="middle" font-size="8" fill="#6b7280">${trueRoadWidth.toFixed(1)}m</text>`;
+    // 인접대지경계선 레이블 (흰 배경, 두 줄)
+    els += `<rect x="${(adjX + 2).toFixed(0)}" y="${(labelY1 - 9)}" width="68" height="24" fill="white" fill-opacity="0.92" rx="2"/>`;
+    els += `<text x="${(adjX + 4).toFixed(0)}" y="${labelY1}" font-size="7.5" fill="#b45309">인접대지경계선</text>`;
+    els += `<text x="${(adjX + 4).toFixed(0)}" y="${labelY2}" font-size="7.5" fill="#b45309">(§86⑥)</text>`;
+    // 필지 북단 레이블 (흰 배경)
     const roadSX = sx(trueRoadWidth);
-    els += `<text x="${(roadSX + 3).toFixed(0)}" y="${labelY1}" font-size="6" fill="#2563eb">필지 북단</text>`;
+    els += `<rect x="${(roadSX + 2).toFixed(0)}" y="${(labelY1 - 9)}" width="42" height="13" fill="white" fill-opacity="0.92" rx="2"/>`;
+    els += `<text x="${(roadSX + 4).toFixed(0)}" y="${labelY1}" font-size="7.5" fill="#2563eb">필지 북단</text>`;
   } else {
-    // 도로 없음: 인접대지경계선 = 필지 북단
-    els += `<text x="${(adjX + 3).toFixed(0)}" y="${labelY1}" font-size="6.5" fill="#b45309">인접대지경계선</text>`;
+    // 도로 없음: 인접대지경계선 = 필지 북단 (흰 배경)
+    els += `<rect x="${(adjX + 2).toFixed(0)}" y="${(labelY1 - 9)}" width="72" height="13" fill="white" fill-opacity="0.92" rx="2"/>`;
+    els += `<text x="${(adjX + 4).toFixed(0)}" y="${labelY1}" font-size="7.5" fill="#b45309">인접대지경계선</text>`;
   }
 
   // ── §86① 정북일조 제한 zone ──────────────────────────────────────────────
@@ -1173,22 +1180,21 @@ function buildNorthSectionSvg(
     if (h > domainH) break;
     const y = sy(h);
     els += `<line x1="${PAD_L-4}" y1="${y.toFixed(1)}" x2="${PAD_L}" y2="${y.toFixed(1)}" stroke="#9ca3af" stroke-width="0.8"/>`;
-    els += `<text x="${(PAD_L-6)}" y="${(y+3).toFixed(0)}" text-anchor="end" font-size="7" fill="#6b7280">${h}</text>`;
+    els += `<text x="${(PAD_L-6)}" y="${(y+3).toFixed(0)}" text-anchor="end" font-size="8" fill="#6b7280">${h}</text>`;
   }
   const ymid = ((PAD_T + H - PAD_B) / 2).toFixed(0);
-  els += `<text x="10" y="${ymid}" text-anchor="middle" font-size="7" fill="#374151" transform="rotate(-90 10 ${ymid})">높이(m)</text>`;
+  els += `<text x="10" y="${ymid}" text-anchor="middle" font-size="8" fill="#374151" transform="rotate(-90 10 ${ymid})">높이(m)</text>`;
 
   // ── X축 (거리, 지면선 아래) ───────────────────────────────────────────────
-  // 양수 값만 표시 (필지 내부 거리)
   const xStep = (lotSouth < 10) ? 2 : (lotSouth < 20) ? 4 : 5;
   for (let d = 0; d <= Math.ceil(lotSouth); d += xStep) {
     if (d < domainLeft || d > domainRight) continue;
     const x = sx(d);
     const gy = sy(0);
     els += `<line x1="${x.toFixed(1)}" y1="${gy.toFixed(1)}" x2="${x.toFixed(1)}" y2="${(gy+4)}" stroke="#9ca3af" stroke-width="0.8"/>`;
-    els += `<text x="${x.toFixed(0)}" y="${(gy+12).toFixed(0)}" text-anchor="middle" font-size="6.5" fill="#6b7280">${d}</text>`;
+    els += `<text x="${x.toFixed(0)}" y="${(gy+13).toFixed(0)}" text-anchor="middle" font-size="8" fill="#6b7280">${d}</text>`;
   }
-  els += `<text x="${((PAD_L+W-PAD_R)/2).toFixed(0)}" y="${(H-3)}" text-anchor="middle" font-size="7" fill="#374151">← 북 / 남 → (northRef 기준 거리·m)</text>`;
+  els += `<text x="${((PAD_L+W-PAD_R)/2).toFixed(0)}" y="${(H-3)}" text-anchor="middle" font-size="8" fill="#374151">← 북 / 남 → (northRef 기준 거리·m)</text>`;
 
   // ── 북 화살표 ─────────────────────────────────────────────────────────────
   const arX = 22, arTop = PAD_T + 8, arBot = PAD_T + 22;
