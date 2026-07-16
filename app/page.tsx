@@ -34,14 +34,6 @@ const PdfExtractPanel = dynamic(() => import("@/components/PdfExtractPanel"), { 
 
 const MassStudyViewer = dynamic(() => import("@/components/MassStudyViewer"), { ssr: false });
 
-const MassPreview3D = dynamic(() => import("@/components/MassPreview3D"), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full rounded-xl bg-[#1a1a2e] flex items-center justify-center" style={{ height: 380 }}>
-      <span className="text-[12px] text-gray-400 animate-pulse">매스 미리보기 로딩 중…</span>
-    </div>
-  ),
-});
 
 type Item = LawItem;
 
@@ -1296,18 +1288,6 @@ export default function Home() {
             );
           })()}
 
-          {r?.coords?.lat && (
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <Accordion title="주변 매스 미리보기" badge={`${cadRadius}m 범위`}>
-                <div className="mt-2">
-                  <MassPreview3D lat={r.coords.lat} lng={r.coords.lng} radius={cadRadius} />
-                  <p className="mt-1.5 text-[10px] text-gray-400">
-                    OSM 건물(높이 포함) · Vworld 필지 · 도로/보도 — 🏗 DAE 버튼으로 SketchUp에서 열 수 있는 파일 다운로드
-                  </p>
-                </div>
-              </Accordion>
-            </div>
-          )}
 
           {/* 매스 스터디 평면 뷰어 */}
           {(massStudyData || massStudyLoading) && (
