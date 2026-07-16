@@ -326,29 +326,36 @@ export async function fetchLandRegistry(pnu: string) {
   const url = `https://api.vworld.kr/ned/data/ladfrlList?key=${LURIS_KEY}&pnu=${pnu}&numOfRows=1&pageNo=1`;
   const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   const body = await res.json();
-  const item = body?.ladfrlList?.field ?? body?.ladfrlVOList?.ladfrlVO;
-  const it = Array.isArray(item) ? item[0] : item;
+  // 실제 응답: body.ladfrlVOList.ladfrlVOList[0]
+  const list = body?.ladfrlVOList?.ladfrlVOList ?? body?.ladfrlList?.field;
+  const it = Array.isArray(list) ? list[0] : list;
   if (!it) return null;
   return {
-    지목: it.lndcgrCodeNm ?? it.jimok ?? null,
-    면적: it.lndpclAr ?? it.area ?? null,
-    소유구분: it.posesnSeCodeNm ?? it.ownerType ?? null,
+    지목: it.lndcgrCodeNm ?? null,
+    면적: it.lndpclAr ?? null,
+    소유구분: it.posesnSeCodeNm ?? null,
   };
 }
 
 // ── 개별공시지가 ──────────────────────────────────────────────────────────────
 export async function fetchLandPrice(pnu: string, year?: string) {
-  const stdrYear = year ?? new Date().getFullYear().toString();
-  const url = `https://api.vworld.kr/ned/data/getIndvdLandPriceAttr?key=${LURIS_KEY}&pnu=${pnu}&stdrYear=${stdrYear}&numOfRows=1&pageNo=1`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-  const body = await res.json();
-  const item = body?.indvdLandPriceAttr?.field ?? body?.indvdLandPriceVOList?.indvdLandPriceVO;
-  const it = Array.isArray(item) ? item[0] : item;
-  if (!it) return null;
-  return {
-    기준연도: it.stdrYear ?? stdrYear,
-    공시지가: it.pblntfPclnd ?? it.landPrice ?? null, // 원/㎡
-  };
+  const currentYear = new Date().getFullYear();
+  const years = year ? [year] : [String(currentYear), String(currentYear - 1)];
+  for (const stdrYear of years) {
+    const url = `https://api.vworld.kr/ned/data/getIndvdLandPriceAttr?key=${LURIS_KEY}&pnu=${pnu}&stdrYear=${stdrYear}&numOfRows=1&pageNo=1`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const body = await res.json();
+    // 실제 응답: body.indvdLandPrices.field[0]
+    const raw = body?.indvdLandPrices?.field ?? body?.indvdLandPriceAttr?.field;
+    const it = Array.isArray(raw) ? raw[0] : raw;
+    if (it?.pblntfPclnd) {
+      return {
+        기준연도: it.stdrYear ?? stdrYear,
+        공시지가: it.pblntfPclnd, // 원/㎡
+      };
+    }
+  }
+  return null;
 }
 
 // ── 건축물대장 층별개요 ────────────────────────────────────────────────────────
