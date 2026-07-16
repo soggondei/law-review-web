@@ -667,10 +667,6 @@ function buildFloorSvg(
         [B[0], B[1] - effectiveSetback],
       ] as [[number,number],[number,number]])
     : [];
-  // 기준선 라벨 Y (SVG 좌표) — 정북제한선 라벨 겹침 방지용
-  const _northBaseAllPts = northFacingBase.flatMap(([A, B]) => [A, B]);
-  const _northBaseMidY   = _northBaseAllPts.reduce((s, p) => s + p[1], 0) / _northBaseAllPts.length;
-  const [, northEdgeSvgY] = toSvg(0, _northBaseMidY);
 
   // 건물 북단 한계: 이격 없으면 필지 북단까지 (BASE_SB 인셋이 실제 한계)
   const bldgNorthLimit = restrictionSegs.length > 0
@@ -707,6 +703,11 @@ function buildFloorSvg(
     [SVG_CX + x * sc, SVG_CY - y * sc];
   const ptStr = (pts: [number, number][]) =>
     pts.map(([x, y]) => toSvg(x, y).map(v => v.toFixed(1)).join(",")).join(" ");
+
+  // 기준선 라벨 SVG Y — 정북제한선 라벨 겹침 방지 클램프용 (toSvg 정의 이후)
+  const _northBaseAllPts = northFacingBase.flatMap(([A, B]) => [A, B]);
+  const _northBaseMidY   = _northBaseAllPts.reduce((s, p) => s + p[1], 0) / _northBaseAllPts.length;
+  const [, northEdgeSvgY] = toSvg(0, _northBaseMidY);
 
   // 다세대주택은 §86① 정북이격 적용 대상 — is채광공동주택(§86③)과 같은 범위로만 한정
   const is공동주택 = ["아파트","연립주택","기숙사"].some(k => input.용도.includes(k));
