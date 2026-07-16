@@ -136,6 +136,7 @@ export default function Home() {
     stats: { 건축면적: number; 연면적: number; 층수: number; 층고: number; 총높이: number };
   } | null>(null);
   const [massStudyLoading, setMassStudyLoading] = useState(false);
+  const [relatedRefs, setRelatedRefs] = useState<{id:string;title:string;imageUrl:string;url:string;architect?:string|null}[]>([]);
 
   // ── 초기화: URL 파라미터 복원 + 히스토리 로드 ──────────────────────────────
   useEffect(() => {
@@ -202,6 +203,34 @@ export default function Home() {
     return () => ctrl.abort();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiResult, editParams.층수, editParams.대지면적]);
+
+  // ── Arch Reference 관련 레퍼런스 ───────────────────────────────────────────
+  useEffect(() => {
+    if (!apiResult || 용도목록.length === 0) { setRelatedRefs([]); return; }
+    const programMap: Record<string, string> = {
+      '단독': '주거', '다가구': '주거', '공동주택': '주거', '기숙사': '주거', '아파트': '주거',
+      '근린생활': '상업', '판매': '상업', '숙박': '상업',
+      '업무': '업무',
+      '문화': '문화', '집회': '문화', '관광': '문화',
+      '교육': '교육', '연구': '교육',
+      '의료': '의료', '노유자': '의료',
+      '종교': '종교',
+      '공장': '산업', '창고': '산업', '위험물': '산업',
+      '공공': '공공',
+    };
+    const programSet = new Set<string>();
+    for (const 용도 of 용도목록) {
+      for (const [key, val] of Object.entries(programMap)) {
+        if (용도.includes(key)) programSet.add(val);
+      }
+    }
+    if (programSet.size === 0) return;
+    fetch(`https://arch-reference.vercel.app/api/refs-by-tag?program=${[...programSet].join(',')}`)
+      .then(r => r.json())
+      .then((data: { refs?: typeof relatedRefs }) => setRelatedRefs(data.refs ?? []))
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiResult, 용도목록]);
 
   // ── 합필 시나리오 ──────────────────────────────────────────────────────────
   type MergePart = { id: number; address: string; 용도지역?: string; 대지면적?: number; status: 'idle'|'loading'|'ok'|'error' };
@@ -1684,6 +1713,46 @@ export default function Home() {
                 )}
               </div>
             </Accordion>
+
+            {relatedRefs.length > 0 && (
+              <Accordion title="관련 레퍼런스" badge={`${relatedRefs.length}건`}>
+                <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {relatedRefs.map(ref => (
+                    <a
+                      key={ref.id}
+                      href={ref.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group rounded-lg overflow-hidden border border-gray-200 hover:border-gray-400 hover:shadow-sm transition-all"
+                    >
+                      <div className="aspect-[4/3] bg-gray-100 overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={ref.imageUrl}
+                          alt={ref.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                      </div>
+                      <div className="p-2">
+                        <p className="text-[11px] font-medium text-gray-800 line-clamp-2 leading-tight">{ref.title}</p>
+                        {ref.architect && <p className="text-[10px] text-gray-400 mt-0.5 truncate">{ref.architect}</p>}
+                      </div>
+                    </a>
+                  ))}
+                </div>
+                <div className="mt-3 text-right">
+                  <a
+                    href="https://arch-reference.vercel.app"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] text-blue-600 hover:underline"
+                  >
+                    Arch Reference에서 더 보기 →
+                  </a>
+                </div>
+              </Accordion>
+            )}
 
             <Accordion title="법령 최신화 현황" badge={lawCheck ? (lawCheck.recentCount > 0 ? `⚠️ ${lawCheck.recentCount}개 최근 개정` : "✅ 이상 없음") : ""}>
               <div className="mt-2 space-y-2">
