@@ -836,8 +836,10 @@ function buildFloorSvg(
     els += `<line x1="${(dimX-3).toFixed(0)}" y1="${dimRefSvgY.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${dimRefSvgY.toFixed(1)}" stroke="#d97706" stroke-width="1.2"/>`;
     els += `<line x1="${(dimX-3).toFixed(0)}" y1="${dimLimitSvgY.toFixed(1)}" x2="${(dimX+3).toFixed(0)}" y2="${dimLimitSvgY.toFixed(1)}" stroke="#d97706" stroke-width="0.8"/>`;
     const midDimSvgY = ((dimRefSvgY + dimLimitSvgY) / 2).toFixed(0);
-    els += `<rect x="${(dimX - 21).toFixed(0)}" y="${(Number(midDimSvgY) - 8).toFixed(0)}" width="20" height="10" fill="white" fill-opacity="0.9" rx="1"/>`;
-    els += `<text x="${(dimX - 11).toFixed(0)}" y="${midDimSvgY}" text-anchor="middle" font-size="7" fill="#b45309">${effectiveSetback.toFixed(2)}m</text>`;
+    const dimLblText = `${effectiveSetback.toFixed(2)}m`;
+    const dimLblW = Math.max(20, dimLblText.length * 4.5 + 4);
+    els += `<rect x="${(dimX - dimLblW / 2 - 10).toFixed(0)}" y="${(Number(midDimSvgY) - 8).toFixed(0)}" width="${dimLblW.toFixed(0)}" height="10" fill="white" fill-opacity="0.9" rx="1"/>`;
+    els += `<text x="${(dimX - 11).toFixed(0)}" y="${midDimSvgY}" text-anchor="middle" font-size="7" fill="#b45309">${dimLblText}</text>`;
   }
 
   // 필지 경계 재드로우 (인접 필지 위에 덮어 선명하게) — 위계 1
