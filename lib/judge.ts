@@ -419,7 +419,8 @@ export function judgeScaleItems(params: {
   // 건축법 시행령 §86 §86 적용 기준일: 동지(12/21) 오전 8시~오후 4시 4시간 일조
   const 동지 = new Date(`${new Date().getFullYear()}-12-21T12:00:00+09:00`);
   const 태양정오 = SunCalc.getPosition(동지, lat, lng);
-  const 태양고도도 = Math.round(태양정오.altitude * (180 / Math.PI) * 10) / 10;
+  // suncalc v3: altitude/azimuth 모두 도(°) 단위, 방위각 기준 북(0°)
+  const 태양고도도 = Math.round(태양정오.altitude * 10) / 10;
   const 동지일출 = SunCalc.getTimes(동지, lat, lng).sunrise;
   const 동지일몰 = SunCalc.getTimes(동지, lat, lng).sunset;
   const fmtTime = (d: Date | null) => d ? d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Seoul" }) : "N/A";
@@ -461,8 +462,9 @@ export function judgeScaleItems(params: {
       : 북측이격 < 4.5
         ? `수직 허용 구간 → 최대 **9m** (이격 ${북측이격}m < 4.5m)`
         : `사선 적용 구간 → 최대 **${최대높이}m** (${북측이격}m × 2)`;
+    const altRad = 태양정오.altitude * (Math.PI / 180);
     const 태양그림자 = 태양고도도 > 0
-      ? `동짓날 정오 기준 건물 그림자 길이: 약 **${Math.round(최대높이 / Math.tan(태양정오.altitude) * 10) / 10}m**`
+      ? `동짓날 정오 기준 건물 그림자 길이: 약 **${Math.round(최대높이 / Math.tan(altRad) * 10) / 10}m**`
       : "";
     일조내용 = [
       `정북 경계까지 **${북측이격}m** → ${구간}`,

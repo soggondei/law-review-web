@@ -126,14 +126,16 @@ export default function LandUseMap({ lat, lng, zoneName, buildingHeight }: LandU
         const date   = new Date(`${year}-12-21T${String(hour).padStart(2, "0")}:00:00+09:00`);
         const sunPos = SunCalc.getPosition(date, lat, lng);
 
+        // suncalc v3: altitude/azimuth 모두 도(°), azimuth 0=북(나침반 기준)
         // 태양 고도 2° 미만 → 그림자 의미 없음
-        if (sunPos.altitude < 0.035) return;
+        if (sunPos.altitude < 2) return;
 
-        const shadowLen  = buildingHeight / Math.tan(sunPos.altitude);
-        // SunCalc.azimuth: 0=south, west=positive (counterclockwise from south)
-        // 그림자 방향 = 태양 반대 → (sin(az), cos(az)) 가 (east, north) 단위 벡터
-        const shadowEast  = Math.sin(sunPos.azimuth);
-        const shadowNorth = Math.cos(sunPos.azimuth);
+        const altRad      = sunPos.altitude * (Math.PI / 180);
+        const shadowLen   = buildingHeight / Math.tan(altRad);
+        // 그림자 방향 = 태양 방위각 + 180° (반대 방향)
+        const shadowAzRad = ((sunPos.azimuth + 180) % 360) * (Math.PI / 180);
+        const shadowEast  = Math.sin(shadowAzRad);
+        const shadowNorth = Math.cos(shadowAzRad);
 
         const endLat = lat + (shadowLen * shadowNorth) / 111320;
         const endLng = lng + (shadowLen * shadowEast) / (111320 * Math.cos(latRad));
@@ -147,7 +149,7 @@ export default function LandUseMap({ lat, lng, zoneName, buildingHeight }: LandU
           dashArray: "7 4",
         })
           .bindTooltip(
-            `${label} (동지) — 그림자 ${Math.round(shadowLen)}m · 태양고도 ${Math.round(sunPos.altitude * 180 / Math.PI)}°`,
+            `${label} (동지) — 그림자 ${Math.round(shadowLen)}m · 태양고도 ${Math.round(sunPos.altitude)}°`,
             { sticky: true },
           )
           .addTo(mapRef.current!);
