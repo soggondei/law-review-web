@@ -1084,10 +1084,11 @@ function buildNorthSectionSvg(
     els += `<rect x="${(adjX + 2).toFixed(0)}" y="${(labelY1 - 9)}" width="68" height="24" fill="white" fill-opacity="0.92" rx="2"/>`;
     els += `<text x="${(adjX + 4).toFixed(0)}" y="${labelY1}" font-size="7.5" fill="#b45309">인접대지경계선</text>`;
     els += `<text x="${(adjX + 4).toFixed(0)}" y="${labelY2}" font-size="7.5" fill="#b45309">(§86⑥)</text>`;
-    // 필지 북단 레이블 (흰 배경)
+    // 필지 북단 레이블: 좁은 도로(adj+70 > road+2)면 Y를 내려 겹침 방지
     const roadSX = sx(trueRoadWidth);
-    els += `<rect x="${(roadSX + 2).toFixed(0)}" y="${(labelY1 - 9)}" width="56" height="13" fill="white" fill-opacity="0.92" rx="2"/>`;
-    els += `<text x="${(roadSX + 4).toFixed(0)}" y="${labelY1}" font-size="7.5" fill="#2563eb">우리 필지 북단</text>`;
+    const lotNLblY = (adjX + 70 > roadSX + 2) ? labelY2 + 15 : labelY1;
+    els += `<rect x="${(roadSX + 2).toFixed(0)}" y="${(lotNLblY - 9)}" width="56" height="13" fill="white" fill-opacity="0.92" rx="2"/>`;
+    els += `<text x="${(roadSX + 4).toFixed(0)}" y="${lotNLblY}" font-size="7.5" fill="#2563eb">우리 필지 북단</text>`;
   } else {
     // 도로 없음: 인접대지경계선 = 필지 북단 (흰 배경)
     els += `<rect x="${(adjX + 2).toFixed(0)}" y="${(labelY1 - 9)}" width="88" height="13" fill="white" fill-opacity="0.92" rx="2"/>`;
