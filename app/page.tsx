@@ -335,6 +335,8 @@ export default function Home() {
       세대수: apiResult.baseData?.세대수 ?? 0,
       북측이격: editParams.북측이격 || undefined,
       인접도로폭,
+      lat: apiResult.coords?.lat,
+      lng: apiResult.coords?.lng,
     });
     const 층수추정 = !editParams.층수직접입력;
     const designItems = judgeDesignItems({ 연면적: 계획연면적, 층수, 용도: apiResult.용도 || "", 대지면적, 지하층, 세대수: apiResult.baseData?.세대수 ?? 0, 기타지구, 높이: editParams.높이 || undefined, 구조: editParams.구조, 시도: siNm, 층수추정, 오피스텔전용면적: editParams.오피스텔전용면적 || undefined });
@@ -1471,6 +1473,7 @@ export default function Home() {
                     lat={r.coords.lat}
                     lng={r.coords.lng}
                     zoneName={r.baseData?.zoneName ?? r.zoneName}
+                    buildingHeight={editParams.높이 || (editParams.층수 > 0 ? editParams.층수 * 3.3 : undefined)}
                   />
                   <div className="flex gap-3 mt-1.5 flex-wrap items-center">
                     {[

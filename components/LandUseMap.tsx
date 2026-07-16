@@ -1,29 +1,40 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Map as LeafletMap, TileLayer } from "leaflet";
+import type { Map as LeafletMap, TileLayer, Polyline as LeafletPolyline, CircleMarker } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 interface LandUseMapProps {
   lat: number;
   lng: number;
   zoneName?: string;
+  buildingHeight?: number;
 }
 
-export default function LandUseMap({ lat, lng, zoneName }: LandUseMapProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef       = useRef<LeafletMap | null>(null);
-  const baseTileRef  = useRef<TileLayer | null>(null);
-  const [satellite, setSatellite] = useState(false);
+const SHADOW_TIMES = [
+  { label: "08:00", hour: 8  },
+  { label: "10:00", hour: 10 },
+  { label: "12:00", hour: 12 },
+  { label: "14:00", hour: 14 },
+  { label: "16:00", hour: 16 },
+];
+const SHADOW_COLORS = ["#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6"];
 
+export default function LandUseMap({ lat, lng, zoneName, buildingHeight }: LandUseMapProps) {
+  const containerRef   = useRef<HTMLDivElement>(null);
+  const mapRef         = useRef<LeafletMap | null>(null);
+  const baseTileRef    = useRef<TileLayer | null>(null);
+  const shadowLayerRef = useRef<(LeafletPolyline | CircleMarker)[]>([]);
+  const [satellite, setSatellite] = useState(false);
+  const [showShadow, setShowShadow] = useState(false);
+
+  // ── 지도 초기화 ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-
     let cancelled = false;
 
     (async () => {
       const L = (await import("leaflet")).default;
-
       if (cancelled || !containerRef.current) return;
 
       const map = L.map(containerRef.current, {
@@ -33,10 +44,8 @@ export default function LandUseMap({ lat, lng, zoneName }: LandUseMapProps) {
         attributionControl: false,
         zoomControl: true,
       });
-
       mapRef.current = map;
 
-      // ── VWorld 기본지도 (도로·건물·지적 배경) ──────────────────
       const baseLayer = L.tileLayer("/api/tile?z={z}&x={x}&y={y}", {
         maxZoom: 19,
         tileSize: 256,
@@ -45,8 +54,6 @@ export default function LandUseMap({ lat, lng, zoneName }: LandUseMapProps) {
       baseLayer.addTo(map);
       baseTileRef.current = baseLayer;
 
-      // ── 토지이용계획 WMS 오버레이 ───────────────────────────────
-      // lt_c_uq111: 용도지역·지구·구역 + 규제 구역 통합 레이어
       (L.tileLayer.wms as Function)("/api/wms", {
         layers:      "lt_c_uq111",
         format:      "image/png",
@@ -57,7 +64,6 @@ export default function LandUseMap({ lat, lng, zoneName }: LandUseMapProps) {
         tileSize:    256,
       } as any).addTo(map);
 
-      // ── 대상 필지 마커 ──────────────────────────────────────────
       L.circleMarker([lat, lng], {
         radius:      9,
         color:       "#1d4ed8",
@@ -68,7 +74,6 @@ export default function LandUseMap({ lat, lng, zoneName }: LandUseMapProps) {
         .bindPopup(zoneName ? `<b>${zoneName}</b>` : "대상 대지", { offset: [0, -6] })
         .addTo(map);
 
-      // ── 나침반/축척 ─────────────────────────────────────────────
       L.control.scale({ imperial: false, position: "bottomright" }).addTo(map);
     })();
 
@@ -79,12 +84,12 @@ export default function LandUseMap({ lat, lng, zoneName }: LandUseMapProps) {
     };
   }, [lat, lng, zoneName]);
 
-  // lat/lng 변경 시 지도 이동
+  // ── 좌표 변경 시 지도 이동 ────────────────────────────────────────────────
   useEffect(() => {
     mapRef.current?.setView([lat, lng], 17);
   }, [lat, lng]);
 
-  // 위성 토글 시 베이스 레이어 교체
+  // ── 위성/지도 토글 ────────────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
     const layer = baseTileRef.current;
@@ -95,6 +100,78 @@ export default function LandUseMap({ lat, lng, zoneName }: LandUseMapProps) {
     (layer as any).setUrl(url);
   }, [satellite]);
 
+  // ── 동지 그림자 오버레이 ─────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+
+    // 기존 레이어 제거
+    shadowLayerRef.current.forEach(l => l.remove());
+    shadowLayerRef.current = [];
+
+    if (!map || !showShadow || !buildingHeight || buildingHeight <= 0) return;
+
+    (async () => {
+      const [L, SunCalc] = await Promise.all([
+        import("leaflet").then(m => m.default),
+        import("suncalc"),
+      ]);
+
+      if (!mapRef.current) return;
+
+      const year   = new Date().getFullYear();
+      const latRad = lat * (Math.PI / 180);
+      const layers: (LeafletPolyline | CircleMarker)[] = [];
+
+      SHADOW_TIMES.forEach(({ label, hour }, i) => {
+        const date   = new Date(`${year}-12-21T${String(hour).padStart(2, "0")}:00:00+09:00`);
+        const sunPos = SunCalc.getPosition(date, lat, lng);
+
+        // 태양 고도 2° 미만 → 그림자 의미 없음
+        if (sunPos.altitude < 0.035) return;
+
+        const shadowLen  = buildingHeight / Math.tan(sunPos.altitude);
+        // SunCalc.azimuth: 0=south, west=positive (counterclockwise from south)
+        // 그림자 방향 = 태양 반대 → (sin(az), cos(az)) 가 (east, north) 단위 벡터
+        const shadowEast  = Math.sin(sunPos.azimuth);
+        const shadowNorth = Math.cos(sunPos.azimuth);
+
+        const endLat = lat + (shadowLen * shadowNorth) / 111320;
+        const endLng = lng + (shadowLen * shadowEast) / (111320 * Math.cos(latRad));
+
+        const color = SHADOW_COLORS[i];
+
+        const line = L.polyline([[lat, lng], [endLat, endLng]], {
+          color,
+          weight:    3,
+          opacity:   0.85,
+          dashArray: "7 4",
+        })
+          .bindTooltip(
+            `${label} (동지) — 그림자 ${Math.round(shadowLen)}m · 태양고도 ${Math.round(sunPos.altitude * 180 / Math.PI)}°`,
+            { sticky: true },
+          )
+          .addTo(mapRef.current!);
+
+        const dot = L.circleMarker([endLat, endLng], {
+          radius:      5,
+          color,
+          fillColor:   color,
+          fillOpacity: 0.9,
+          weight:      1,
+        }).addTo(mapRef.current!);
+
+        layers.push(line, dot);
+      });
+
+      shadowLayerRef.current = layers;
+    })();
+
+    return () => {
+      shadowLayerRef.current.forEach(l => l.remove());
+      shadowLayerRef.current = [];
+    };
+  }, [showShadow, buildingHeight, lat, lng]);
+
   return (
     <div className="relative w-full">
       <div
@@ -102,14 +179,49 @@ export default function LandUseMap({ lat, lng, zoneName }: LandUseMapProps) {
         className="w-full rounded-lg overflow-hidden border border-gray-200"
         style={{ height: 320 }}
       />
-      <button
-        onClick={() => setSatellite(s => !s)}
-        className={`absolute top-2 right-2 z-[1000] text-[11px] px-2 py-1 rounded font-medium shadow transition-colors ${
-          satellite ? "bg-[#1F4E79] text-white" : "bg-white text-gray-600 border border-gray-300 hover:bg-gray-50"
-        }`}
-      >
-        {satellite ? "🛰 위성" : "🗺 지도"}
-      </button>
+
+      {/* 우상단 버튼 */}
+      <div className="absolute top-2 right-2 z-[1000] flex gap-1.5">
+        {!!buildingHeight && buildingHeight > 0 && (
+          <button
+            onClick={() => setShowShadow(s => !s)}
+            title="동지(12/21) 시간대별 그림자 — 8·10·12·14·16시"
+            className={`text-[11px] px-2 py-1 rounded font-medium shadow transition-colors ${
+              showShadow
+                ? "bg-orange-500 text-white"
+                : "bg-white text-gray-600 border border-gray-300 hover:bg-gray-50"
+            }`}
+          >
+            {showShadow ? "☀ 그림자 ON" : "☀ 그림자"}
+          </button>
+        )}
+        <button
+          onClick={() => setSatellite(s => !s)}
+          className={`text-[11px] px-2 py-1 rounded font-medium shadow transition-colors ${
+            satellite ? "bg-[#1F4E79] text-white" : "bg-white text-gray-600 border border-gray-300 hover:bg-gray-50"
+          }`}
+        >
+          {satellite ? "🛰 위성" : "🗺 지도"}
+        </button>
+      </div>
+
+      {/* 그림자 범례 */}
+      {showShadow && !!buildingHeight && buildingHeight > 0 && (
+        <div className="absolute bottom-8 left-2 z-[1000] bg-white/90 rounded px-2.5 py-2 text-[10px] shadow border border-gray-200">
+          <div className="font-semibold text-gray-700 mb-1.5">
+            동지 그림자 · 건물 {buildingHeight}m
+          </div>
+          {SHADOW_TIMES.map(({ label }, i) => (
+            <div key={label} className="flex items-center gap-1.5 mb-0.5">
+              <span
+                className="inline-block w-5 h-[2px] rounded"
+                style={{ background: SHADOW_COLORS[i] }}
+              />
+              <span className="text-gray-600">{label}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
