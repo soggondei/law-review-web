@@ -657,8 +657,12 @@ function buildFloorSvg(
   const roadCenterY = hasNorthRoad ? parcelBox.maxY + roadOffset / 2 : parcelBox.maxY;
 
   // 정북일조제한선 세그먼트: effectiveSetback > 0인 경우만
+  // northFacingEdges가 비어있으면 필지 bbox 북단 수평선을 fallback으로 사용
+  const northFacingBase: [[number,number],[number,number]][] = northFacingEdges.length > 0
+    ? northFacingEdges
+    : [[[parcelBox.minX, parcelBox.maxY], [parcelBox.maxX, parcelBox.maxY]]];
   const restrictionSegs: [[number,number],[number,number]][] = effectiveSetback > 0
-    ? northFacingEdges.map(([A, B]) => [
+    ? northFacingBase.map(([A, B]) => [
         [A[0], A[1] - effectiveSetback],
         [B[0], B[1] - effectiveSetback],
       ] as [[number,number],[number,number]])
@@ -748,22 +752,20 @@ function buildFloorSvg(
       els += `<text x="${clampedLbl2X.toFixed(0)}" y="${(rdcY - 3).toFixed(0)}" text-anchor="middle" font-size="7.5" fill="#7c3aed">${lbl}</text>`;
     } else {
       // §86① 비공동주택: 우리 필지 북향 에지 = 기준선 표시 (실선, 위계 3)
-      for (const [nbA, nbB] of northFacingEdges) {
+      for (const [nbA, nbB] of northFacingBase) {
         const [ax, ay] = toSvg(nbA[0], nbA[1]);
         const [bx, by] = toSvg(nbB[0], nbB[1]);
         els += `<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}" stroke="#b45309" stroke-width="1.5"/>`;
       }
-      const allNbPts = northFacingEdges.flatMap(([A, B]) => [A, B]);
-      if (allNbPts.length > 0) {
-        const nrLblX = allNbPts.reduce((s, p) => s + p[0], 0) / allNbPts.length;
-        const nrLblY = allNbPts.reduce((s, p) => s + p[1], 0) / allNbPts.length;
-        const [nrSvgX, nrSvgY] = toSvg(nrLblX, nrLblY);
-        const lbl = hasNorthRoad ? `우리 필지 북단 (§86⑥)` : `인접대지경계선 (§86①)`;
-        const lblW = lbl.length * 8 + 16;
-        const clampedLblX = Math.max(lblW/2 + 4, Math.min(W - lblW/2 - 4, nrSvgX));
-        els += `<rect x="${(clampedLblX - lblW/2).toFixed(0)}" y="${(nrSvgY - 11).toFixed(0)}" width="${lblW.toFixed(0)}" height="10" fill="white" fill-opacity="0.88" rx="2"/>`;
-        els += `<text x="${clampedLblX.toFixed(0)}" y="${(nrSvgY - 3).toFixed(0)}" text-anchor="middle" font-size="7.5" fill="#b45309">${lbl}</text>`;
-      }
+      const allNbPts = northFacingBase.flatMap(([A, B]) => [A, B]);
+      const nrLblX = allNbPts.reduce((s, p) => s + p[0], 0) / allNbPts.length;
+      const nrLblY = allNbPts.reduce((s, p) => s + p[1], 0) / allNbPts.length;
+      const [nrSvgX, nrSvgY] = toSvg(nrLblX, nrLblY);
+      const lbl = hasNorthRoad ? `우리 필지 북단 (§86⑥)` : `인접대지경계선 (§86①)`;
+      const lblW = lbl.length * 8 + 16;
+      const clampedLblX = Math.max(lblW/2 + 4, Math.min(W - lblW/2 - 4, nrSvgX));
+      els += `<rect x="${(clampedLblX - lblW/2).toFixed(0)}" y="${(nrSvgY - 11).toFixed(0)}" width="${lblW.toFixed(0)}" height="10" fill="white" fill-opacity="0.88" rx="2"/>`;
+      els += `<text x="${clampedLblX.toFixed(0)}" y="${(nrSvgY - 3).toFixed(0)}" text-anchor="middle" font-size="7.5" fill="#b45309">${lbl}</text>`;
     }
   }
 
@@ -1079,12 +1081,12 @@ function buildNorthSectionSvg(
     els += `<text x="${(adjX + 4).toFixed(0)}" y="${labelY2}" font-size="7.5" fill="#b45309">(§86⑥)</text>`;
     // 필지 북단 레이블 (흰 배경)
     const roadSX = sx(trueRoadWidth);
-    els += `<rect x="${(roadSX + 2).toFixed(0)}" y="${(labelY1 - 9)}" width="42" height="13" fill="white" fill-opacity="0.92" rx="2"/>`;
-    els += `<text x="${(roadSX + 4).toFixed(0)}" y="${labelY1}" font-size="7.5" fill="#2563eb">필지 북단</text>`;
+    els += `<rect x="${(roadSX + 2).toFixed(0)}" y="${(labelY1 - 9)}" width="56" height="13" fill="white" fill-opacity="0.92" rx="2"/>`;
+    els += `<text x="${(roadSX + 4).toFixed(0)}" y="${labelY1}" font-size="7.5" fill="#2563eb">우리 필지 북단</text>`;
   } else {
     // 도로 없음: 인접대지경계선 = 필지 북단 (흰 배경)
-    els += `<rect x="${(adjX + 2).toFixed(0)}" y="${(labelY1 - 9)}" width="72" height="13" fill="white" fill-opacity="0.92" rx="2"/>`;
-    els += `<text x="${(adjX + 4).toFixed(0)}" y="${labelY1}" font-size="7.5" fill="#b45309">인접대지경계선</text>`;
+    els += `<rect x="${(adjX + 2).toFixed(0)}" y="${(labelY1 - 9)}" width="88" height="13" fill="white" fill-opacity="0.92" rx="2"/>`;
+    els += `<text x="${(adjX + 4).toFixed(0)}" y="${labelY1}" font-size="7.5" fill="#b45309">인접대지경계선 (§86①)</text>`;
   }
 
   // ── §86① 정북일조 제한 zone ──────────────────────────────────────────────
