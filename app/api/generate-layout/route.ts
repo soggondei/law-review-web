@@ -742,9 +742,10 @@ function buildFloorSvg(
       els += `<line x1="${cx1.toFixed(1)}" y1="${cy1.toFixed(1)}" x2="${cx2.toFixed(1)}" y2="${cy2.toFixed(1)}" stroke="#7c3aed" stroke-width="1.8" stroke-dasharray="6,3"/>`;
       const [rdcX, rdcY] = toSvg(0, refY);
       const lbl = hasNorthRoad ? `도로 중심선 (§86③⑥)` : `인접대지경계선 (§86③)`;
-      const lblW2 = lbl.length * 5.8 + 10;
-      els += `<rect x="${(rdcX - lblW2/2).toFixed(0)}" y="${(rdcY - 11).toFixed(0)}" width="${lblW2.toFixed(0)}" height="10" fill="white" fill-opacity="0.88" rx="2"/>`;
-      els += `<text x="${rdcX.toFixed(0)}" y="${(rdcY - 3).toFixed(0)}" text-anchor="middle" font-size="7.5" fill="#7c3aed">${lbl}</text>`;
+      const lblW2 = lbl.length * 8 + 16;
+      const clampedLbl2X = Math.max(lblW2/2 + 4, Math.min(W - lblW2/2 - 4, rdcX));
+      els += `<rect x="${(clampedLbl2X - lblW2/2).toFixed(0)}" y="${(rdcY - 11).toFixed(0)}" width="${lblW2.toFixed(0)}" height="10" fill="white" fill-opacity="0.88" rx="2"/>`;
+      els += `<text x="${clampedLbl2X.toFixed(0)}" y="${(rdcY - 3).toFixed(0)}" text-anchor="middle" font-size="7.5" fill="#7c3aed">${lbl}</text>`;
     } else {
       // §86① 비공동주택: 우리 필지 북향 에지 = 기준선 표시 (실선, 위계 3)
       for (const [nbA, nbB] of northFacingEdges) {
@@ -758,9 +759,10 @@ function buildFloorSvg(
         const nrLblY = allNbPts.reduce((s, p) => s + p[1], 0) / allNbPts.length;
         const [nrSvgX, nrSvgY] = toSvg(nrLblX, nrLblY);
         const lbl = hasNorthRoad ? `우리 필지 북단 (§86⑥)` : `인접대지경계선 (§86①)`;
-        const lblW = lbl.length * 5.8 + 10;
-        els += `<rect x="${(nrSvgX - lblW/2).toFixed(0)}" y="${(nrSvgY - 11).toFixed(0)}" width="${lblW.toFixed(0)}" height="10" fill="white" fill-opacity="0.88" rx="2"/>`;
-        els += `<text x="${nrSvgX.toFixed(0)}" y="${(nrSvgY - 3).toFixed(0)}" text-anchor="middle" font-size="7.5" fill="#b45309">${lbl}</text>`;
+        const lblW = lbl.length * 8 + 16;
+        const clampedLblX = Math.max(lblW/2 + 4, Math.min(W - lblW/2 - 4, nrSvgX));
+        els += `<rect x="${(clampedLblX - lblW/2).toFixed(0)}" y="${(nrSvgY - 11).toFixed(0)}" width="${lblW.toFixed(0)}" height="10" fill="white" fill-opacity="0.88" rx="2"/>`;
+        els += `<text x="${clampedLblX.toFixed(0)}" y="${(nrSvgY - 3).toFixed(0)}" text-anchor="middle" font-size="7.5" fill="#b45309">${lbl}</text>`;
       }
     }
   }
@@ -807,9 +809,10 @@ function buildFloorSvg(
     const rlbl = is채광공동주택
       ? `채광제한선 §86③ (${effectiveSetback.toFixed(2)}m)`
       : `정북제한선 §86① (${effectiveSetback.toFixed(2)}m)`;
-    const rlblW = rlbl.length * 5.8 + 10;
-    els += `<rect x="${(lmSvgX - rlblW/2).toFixed(0)}" y="${(lmSvgY - 8).toFixed(0)}" width="${rlblW.toFixed(0)}" height="10" fill="white" fill-opacity="0.88" rx="2"/>`;
-    els += `<text x="${lmSvgX.toFixed(0)}" y="${lmSvgY.toFixed(0)}" text-anchor="middle" font-size="7.5" fill="#b45309">${rlbl}</text>`;
+    const rlblW = rlbl.length * 8 + 16;
+    const clampedRlblX = Math.max(rlblW/2 + 4, Math.min(W - rlblW/2 - 4, lmSvgX));
+    els += `<rect x="${(clampedRlblX - rlblW/2).toFixed(0)}" y="${(lmSvgY - 8).toFixed(0)}" width="${rlblW.toFixed(0)}" height="10" fill="white" fill-opacity="0.88" rx="2"/>`;
+    els += `<text x="${clampedRlblX.toFixed(0)}" y="${lmSvgY.toFixed(0)}" text-anchor="middle" font-size="7.5" fill="#b45309">${rlbl}</text>`;
 
     // ⑦-b 치수선: 인접대지경계선(우리 필지 북단) → 정북일조제한선
     const northFacingMaxY = northFacingEdges.length > 0
