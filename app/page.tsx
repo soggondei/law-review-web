@@ -1473,7 +1473,7 @@ export default function Home() {
                     lat={r.coords.lat}
                     lng={r.coords.lng}
                     zoneName={r.baseData?.zoneName ?? r.zoneName}
-                    buildingHeight={editParams.높이 || (editParams.층수 > 0 ? editParams.층수 * 3.3 : undefined)}
+                    buildingHeight={editParams.높이 || (editParams.층수 > 0 ? Math.round(editParams.층수 * 33) / 10 : undefined)}
                   />
                   <div className="flex gap-3 mt-1.5 flex-wrap items-center">
                     {[
