@@ -817,9 +817,7 @@ function buildFloorSvg(
     els += `<text x="${clampedRlblX.toFixed(0)}" y="${lmSvgY.toFixed(0)}" text-anchor="middle" font-size="7.5" fill="#b45309">${rlbl}</text>`;
 
     // ⑦-b 치수선: 인접대지경계선(우리 필지 북단) → 정북일조제한선
-    const northFacingMaxY = northFacingEdges.length > 0
-      ? Math.max(...northFacingEdges.flatMap(([A, B]) => [A[1], B[1]]))
-      : parcelBox.maxY;
+    const northFacingMaxY = Math.max(...northFacingBase.flatMap(([A, B]) => [A[1], B[1]]));
     const dimRefY   = northFacingMaxY;
     const dimLimitY = northFacingMaxY - effectiveSetback;
     const [, dimRefSvgY  ] = toSvg(0, dimRefY);
