@@ -700,7 +700,8 @@ function buildFloorSvg(
   const ptStr = (pts: [number, number][]) =>
     pts.map(([x, y]) => toSvg(x, y).map(v => v.toFixed(1)).join(",")).join(" ");
 
-  const is공동주택 = ["아파트","연립주택","다세대주택","기숙사"].some(k => input.용도.includes(k));
+  // 다세대주택은 §86① 정북이격 적용 대상 — is채광공동주택(§86③)과 같은 범위로만 한정
+  const is공동주택 = ["아파트","연립주택","기숙사"].some(k => input.용도.includes(k));
 
   // ── hatch 패턴 정의 ──────────────────────────────────────────────────
   let els = `<defs>
@@ -919,7 +920,17 @@ function generateFloorRooms(용도: string, 가로: number, 세로: number, 층:
 
   const rx = coreW, rw = 가로 - coreW;
 
-  if (용도.includes("단독주택") || 용도.includes("단독") || 용도.includes("주택")) {
+  if (용도.includes("다세대주택") || 용도.includes("연립주택")) {
+    // 다세대/연립: 호별 분리 레이아웃 (층마다 2호)
+    const unitW = rw / 2;
+    for (let u = 0; u < 2; u++) {
+      const ux = rx + u * unitW;
+      rooms.push({ label: `${층}0${u+1}호 거실`, x: ux, y: 0, w: unitW, h: 세로 * 0.45 });
+      rooms.push({ label: `침실`, x: ux, y: 세로 * 0.45, w: unitW * 0.60, h: 세로 * 0.30 });
+      rooms.push({ label: `욕실`, x: ux + unitW * 0.60, y: 세로 * 0.45, w: unitW * 0.40, h: 세로 * 0.30 });
+      rooms.push({ label: `주방`, x: ux, y: 세로 * 0.75, w: unitW, h: 세로 * 0.25 });
+    }
+  } else if (용도.includes("단독주택") || 용도.includes("단독") || 용도.includes("주택")) {
     if (층 === 1) {
       rooms.push({ label: "거실", x: rx, y: 0, w: rw, h: 세로 * 0.52 });
       rooms.push({ label: "주방·식당", x: rx, y: 세로 * 0.52, w: rw * 0.58, h: 세로 * 0.28 });
@@ -1365,7 +1376,8 @@ export async function POST(req: NextRequest) {
   // 주차대수
   const 주차대수 = calcParkingCount(input.용도, 연면적);
 
-  const is공동주택 = ["아파트","연립주택","다세대주택","기숙사"].some(k => input.용도.includes(k));
+  // 다세대주택은 §86① 정북이격 적용 대상 — is채광공동주택(§86③)과 같은 범위로만 한정
+  const is공동주택 = ["아파트","연립주택","기숙사"].some(k => input.용도.includes(k));
   const 달성건폐율 = Math.round(건축면적실 / input.대지면적 * 1000) / 10;
   const 달성용적률 = Math.round(연면적 / input.대지면적 * 1000) / 10;
 
