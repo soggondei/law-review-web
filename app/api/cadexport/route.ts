@@ -233,6 +233,9 @@ function lwPolyline(
     g(0, "POLYLINE"),
     g(8, layer),
     g(66, 1),           // vertices follow
+    g(10, "0.0"),       // dummy origin required by R12
+    g(20, "0.0"),
+    g(30, "0.0"),
     g(70, closed ? 1 : 0),
   ];
   for (const [x, y] of pts) {
@@ -241,6 +244,8 @@ function lwPolyline(
       g(8, layer),
       g(10, x.toFixed(3)),
       g(20, y.toFixed(3)),
+      g(30, "0.0"),     // Z coordinate required in R12
+      g(70, 0),         // vertex flags
     );
   }
   lines.push(g(0, "SEQEND"), g(8, layer));
@@ -350,7 +355,7 @@ function buildDxf(
         g(2, l.name),
         g(70, 0),
         g(62, l.color),
-        g(6, "CONTINUOUS"),
+        g(6, "Continuous"),
       ].join("\n"),
     )
     .join("\n");
@@ -369,30 +374,56 @@ function buildDxf(
     g(0, "ENDSEC"),
   ].join("\n");
 
-  // LTYPE 테이블 — LAYER가 참조하는 CONTINUOUS 선 종류가 먼저 정의되어야 함
-  const ltypeTable = [
-    g(0, "TABLE"),
-    g(2, "LTYPE"),
-    g(70, 1),
-    g(0, "LTYPE"),
-    g(2, "CONTINUOUS"),
-    g(70, 0),
-    g(3, "Solid line"),
-    g(72, 65),
-    g(73, 0),
-    g(40, 0.0),
+  // VPORT 테이블 (빈 테이블 — 없으면 일부 CAD가 거부)
+  const vportTable = [
+    g(0, "TABLE"), g(2, "VPORT"), g(70, 0),
     g(0, "ENDTAB"),
   ].join("\n");
+
+  // LTYPE 테이블 — ByBlock, ByLayer, Continuous 모두 정의
+  const ltypeTable = [
+    g(0, "TABLE"), g(2, "LTYPE"), g(70, 3),
+    g(0, "LTYPE"), g(2, "ByBlock"), g(70, 0), g(3, ""), g(72, 65), g(73, 0), g(40, "0.0"),
+    g(0, "LTYPE"), g(2, "ByLayer"), g(70, 0), g(3, ""), g(72, 65), g(73, 0), g(40, "0.0"),
+    g(0, "LTYPE"), g(2, "Continuous"), g(70, 0), g(3, "Solid line"), g(72, 65), g(73, 0), g(40, "0.0"),
+    g(0, "ENDTAB"),
+  ].join("\n");
+
+  // STYLE 테이블 — TEXT 엔티티가 있으면 반드시 필요
+  const styleTable = [
+    g(0, "TABLE"), g(2, "STYLE"), g(70, 1),
+    g(0, "STYLE"), g(2, "Standard"), g(70, 0), g(40, "0.0"), g(41, "1.0"),
+    g(50, "0.0"), g(71, 0), g(42, "2.5"), g(3, "txt"), g(4, ""),
+    g(0, "ENDTAB"),
+  ].join("\n");
+
+  // VIEW, UCS 빈 테이블
+  const viewTable  = [g(0, "TABLE"), g(2, "VIEW"),  g(70, 0), g(0, "ENDTAB")].join("\n");
+  const ucsTable   = [g(0, "TABLE"), g(2, "UCS"),   g(70, 0), g(0, "ENDTAB")].join("\n");
+
+  // APPID 테이블 — ACAD 앱 등록
+  const appidTable = [
+    g(0, "TABLE"), g(2, "APPID"), g(70, 1),
+    g(0, "APPID"), g(2, "ACAD"), g(70, 0),
+    g(0, "ENDTAB"),
+  ].join("\n");
+
+  // DIMSTYLE 빈 테이블
+  const dimstyleTable = [g(0, "TABLE"), g(2, "DIMSTYLE"), g(70, 0), g(0, "ENDTAB")].join("\n");
 
   const tables = [
     g(0, "SECTION"),
     g(2, "TABLES"),
+    vportTable,
     ltypeTable,
-    g(0, "TABLE"),
-    g(2, "LAYER"),
-    g(70, layers.length),
+    g(0, "TABLE"), g(2, "LAYER"), g(70, layers.length),
     layerDefs,
     g(0, "ENDTAB"),
+    styleTable,
+    viewTable,
+    ucsTable,
+    appidTable,
+    dimstyleTable,
     g(0, "ENDSEC"),
   ].join("\n");
 
