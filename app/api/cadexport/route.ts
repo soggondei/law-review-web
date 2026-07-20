@@ -362,9 +362,11 @@ function buildDxf(
     g(9, "$EXTMIN"),
     g(10, bbox.minX.toFixed(3)),
     g(20, bbox.minY.toFixed(3)),
+    g(30, 0),
     g(9, "$EXTMAX"),
     g(10, bbox.maxX.toFixed(3)),
     g(20, bbox.maxY.toFixed(3)),
+    g(30, 0),
     g(0, "ENDSEC"),
   ].join("\n");
 
