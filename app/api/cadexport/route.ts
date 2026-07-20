@@ -281,6 +281,7 @@ function buildDxf(
   const targetLineWidth = Math.max(extent * 0.002, 0.1);
 
   const layers: { name: string; color: number }[] = [
+    { name: "0",              color: 7 }, // DXF 필수 기본 레이어
     { name: "TARGET_PARCEL",    color: 1 }, // 빨강 — 대상 필지
     { name: "TARGET_LABEL",     color: 1 }, // 빨강 — 대상 지번
     { name: "NEIGHBOR_PARCELS", color: 5 }, // 파랑 — 주변 필지
@@ -354,19 +355,13 @@ function buildDxf(
     g(0, "SECTION"),
     g(2, "HEADER"),
     g(9, "$ACADVER"),
-    g(1, "AC1015"),
-    g(9, "$INSUNITS"),
-    g(70, 6),  // 6 = meters
-    g(9, "$MEASUREMENT"),
-    g(70, 1),  // 1 = metric
+    g(1, "AC1009"),  // R12 — BLOCKS/OBJECTS 없이도 유효한 최소 형식
     g(9, "$EXTMIN"),
     g(10, bbox.minX.toFixed(3)),
     g(20, bbox.minY.toFixed(3)),
-    g(30, 0),
     g(9, "$EXTMAX"),
     g(10, bbox.maxX.toFixed(3)),
     g(20, bbox.maxY.toFixed(3)),
-    g(30, 0),
     g(0, "ENDSEC"),
   ].join("\n");
 
