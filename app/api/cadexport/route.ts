@@ -535,6 +535,20 @@ export async function GET(req: NextRequest) {
   const cy5186 = (bbox.minY + bbox.maxY) / 2;
   const neighbors = await fetchByBBox(lat, lng, radius, cx5186, cy5186, target.pnu);
 
+  // ?debug=1 → JSON으로 파이프라인 상태 반환 (주변 필지 문제 진단용)
+  if (searchParams.get("debug") === "1") {
+    return NextResponse.json({
+      targetPnu,
+      target: { jibun: target.jibun, polygons: target.polygons.length },
+      bbox,
+      cx5186, cy5186,
+      neighborsCount: neighbors.length,
+      firstNeighbor: neighbors[0]
+        ? { jibun: neighbors[0].jibun, firstPt: neighbors[0].polygons[0]?.[0]?.[0] }
+        : null,
+    });
+  }
+
   // 4. DXF 생성
   const dxf = buildDxf(target, neighbors, bbox, addr);
   const safe = addr.slice(0, 20).replace(/[/\\:*?"<>|]/g, "_");
