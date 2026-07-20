@@ -60,24 +60,30 @@ async function fetchByPnu(pnu: string): Promise<Parcel | null> {
   }
 }
 
-/** EPSG:5186 BOX(미터 단위)로 주변 필지 조회 */
+/** WGS84 lat/lng 중심 + radius(m)로 주변 필지 조회, 결과는 EPSG:5186 좌표 */
 async function fetchByBBox(
-  minX: number,
-  minY: number,
-  maxX: number,
-  maxY: number,
+  lat: number,
+  lng: number,
+  radius: number,
   excludePnu?: string,
 ): Promise<Parcel[]> {
-  const geomFilter = `BOX(${minX},${minY},${maxX},${maxY})`;
+  // VWorld LP_PA_CBND_BUBUN은 geomFilter가 crs와 같은 좌표계여야 함.
+  // EPSG:5186 bbox로 조회 시 응답이 없는 경우가 있어 WGS84 bbox로 조회하고
+  // 결과 좌표계는 EPSG:5186으로 받는다.
+  const M_PER_LAT = 111320;
+  const mPerLng = M_PER_LAT * Math.cos((lat * Math.PI) / 180);
+  const dLat = radius / M_PER_LAT;
+  const dLng = radius / mPerLng;
+  const geomFilter = `BOX(${(lng - dLng).toFixed(6)},${(lat - dLat).toFixed(6)},${(lng + dLng).toFixed(6)},${(lat + dLat).toFixed(6)})`;
   const params = new URLSearchParams({
     service: "data",
     request: "GetFeature",
     data: "LP_PA_CBND_BUBUN",
     key: vkey(),
     domain: "localhost",
-    geomFilter,
+    geomFilter,           // WGS84(EPSG:4326) bbox
     format: "json",
-    crs: "EPSG:5186",
+    crs: "EPSG:5186",    // 결과 좌표계는 EPSG:5186
     size: "1000",
     page: "1",
   });
@@ -223,18 +229,9 @@ function g(code: number, value: string | number): string {
   return `${code}\n${value}`;
 }
 
-// DXF AC1009은 ASCII 전용 — 한글 등 non-ASCII는 \U+XXXX 이스케이프 필요
+// ZWCAD/GstarCAD는 \U+XXXX 이스케이프를 미지원 — 비ASCII 문자는 제거
 function dxfStr(str: string): string {
-  let out = "";
-  for (const ch of str) {
-    const code = ch.charCodeAt(0);
-    if (code > 127) {
-      out += `\\U+${code.toString(16).toUpperCase().padStart(4, "0")}`;
-    } else {
-      out += ch;
-    }
-  }
-  return out;
+  return str.replace(/[^\x00-\x7F]/g, "");
 }
 
 // AC1009(R12) 호환 폴리라인 — LWPOLYLINE은 R2000+ 전용이므로 사용 불가
@@ -378,13 +375,15 @@ function buildDxf(
     g(0, "SECTION"),
     g(2, "HEADER"),
     g(9, "$ACADVER"),
-    g(1, "AC1009"),  // R12 — BLOCKS/OBJECTS 없이도 유효한 최소 형식
+    g(1, "AC1009"),  // R12 — 범용 최소 포맷
     g(9, "$EXTMIN"),
     g(10, bbox.minX.toFixed(3)),
     g(20, bbox.minY.toFixed(3)),
+    g(30, "0.000"),  // Z좌표 필수 — 없으면 일부 CAD가 헤더 파싱 실패
     g(9, "$EXTMAX"),
     g(10, bbox.maxX.toFixed(3)),
     g(20, bbox.maxY.toFixed(3)),
+    g(30, "0.000"),
     g(0, "ENDSEC"),
   ].join("\n");
 
@@ -499,15 +498,9 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // 3. EPSG:5186 bbox 계산 후 주변 필지 조회
+  // 3. bbox 계산 및 주변 필지 조회 (WGS84 bbox → EPSG:5186 결과)
   const bbox = computeBBox(target, radius);
-  const neighbors = await fetchByBBox(
-    bbox.minX,
-    bbox.minY,
-    bbox.maxX,
-    bbox.maxY,
-    target.pnu,
-  );
+  const neighbors = await fetchByBBox(lat, lng, radius, target.pnu);
 
   // 4. DXF 생성
   const dxf = buildDxf(target, neighbors, bbox, addr);
