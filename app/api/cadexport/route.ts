@@ -223,23 +223,27 @@ function g(code: number, value: string | number): string {
   return `${code}\n${value}`;
 }
 
+// AC1009(R12) 호환 폴리라인 — LWPOLYLINE은 R2000+ 전용이므로 사용 불가
 function lwPolyline(
   layer: string,
   pts: [number, number][],
   closed: boolean,
-  width?: number,
 ): string {
   const lines: string[] = [
-    g(0, "LWPOLYLINE"),
+    g(0, "POLYLINE"),
     g(8, layer),
-    g(90, pts.length),
+    g(66, 1),           // vertices follow
     g(70, closed ? 1 : 0),
   ];
-  if (width !== undefined) lines.push(g(43, width.toFixed(3)));
   for (const [x, y] of pts) {
-    lines.push(g(10, x.toFixed(3)));
-    lines.push(g(20, y.toFixed(3)));
+    lines.push(
+      g(0, "VERTEX"),
+      g(8, layer),
+      g(10, x.toFixed(3)),
+      g(20, y.toFixed(3)),
+    );
   }
+  lines.push(g(0, "SEQEND"), g(8, layer));
   return lines.join("\n");
 }
 
@@ -313,7 +317,7 @@ function buildDxf(
       const pts = ring.map(([x, y]) => [x, y] as [number, number]);
       if (pts.length >= 3)
         entities.push(
-          lwPolyline("TARGET_PARCEL", pts, true, targetLineWidth),
+          lwPolyline("TARGET_PARCEL", pts, true),
         );
     }
   }
