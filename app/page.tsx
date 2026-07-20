@@ -1523,6 +1523,11 @@ export default function Home() {
                   ))}
                 </div>
               )}
+              {r.densityRuleStatus && !r.densityRuleStatus.startsWith("지자체 조례") && (
+                <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mb-2">
+                  ⚠ {r.densityRuleStatus}
+                </div>
+              )}
               <ItemTable items={computed.scaleItems} />
             </Accordion>
 

@@ -1,5 +1,6 @@
 export const preferredRegion = ["icn1"];
 import { NextRequest, NextResponse } from "next/server";
+import iconv from "iconv-lite";
 
 const VWORLD_BASE = "https://api.vworld.kr/req/data";
 
@@ -229,9 +230,9 @@ function g(code: number, value: string | number): string {
   return `${code}\n${value}`;
 }
 
-// ZWCAD/GstarCAD는 \U+XXXX 이스케이프를 미지원 — 비ASCII 문자는 제거
+// 한글은 CP949 인코딩으로 출력하므로 문자열 그대로 사용
 function dxfStr(str: string): string {
-  return str.replace(/[^\x00-\x7F]/g, "");
+  return str;
 }
 
 // AC1009(R12) 호환 폴리라인 — LWPOLYLINE은 R2000+ 전용이므로 사용 불가
@@ -298,15 +299,20 @@ function buildDxf(
   );
   const targetLabelH = Math.max(extent * 0.025, 0.3);
   const neighborLabelH = Math.max(targetLabelH * 0.6, 0.2);
-  const targetLineWidth = Math.max(extent * 0.002, 0.1);
+
+  // bbox 중심을 원점(0,0)으로 이동
+  const cx = (bbox.minX + bbox.maxX) / 2;
+  const cy = (bbox.minY + bbox.maxY) / 2;
+  const tx = (x: number) => x - cx;
+  const ty = (y: number) => y - cy;
 
   const layers: { name: string; color: number }[] = [
-    { name: "0",              color: 7 }, // DXF 필수 기본 레이어
-    { name: "TARGET_PARCEL",    color: 1 }, // 빨강 — 대상 필지
-    { name: "TARGET_LABEL",     color: 1 }, // 빨강 — 대상 지번
-    { name: "NEIGHBOR_PARCELS", color: 5 }, // 파랑 — 주변 필지
-    { name: "NEIGHBOR_LABEL",   color: 5 }, // 파랑 — 주변 지번
-    { name: "SOURCE_NOTE",      color: 3 }, // 초록 — 출처
+    { name: "0",              color: 7 },
+    { name: "TARGET_PARCEL",    color: 1 },
+    { name: "TARGET_LABEL",     color: 1 },
+    { name: "NEIGHBOR_PARCELS", color: 5 },
+    { name: "NEIGHBOR_LABEL",   color: 5 },
+    { name: "SOURCE_NOTE",      color: 3 },
   ];
 
   const entities: string[] = [];
@@ -315,7 +321,7 @@ function buildDxf(
   for (const nb of neighbors) {
     for (const polygon of nb.polygons) {
       for (const ring of polygon) {
-        const pts = ring.map(([x, y]) => [x, y] as [number, number]);
+        const pts = ring.map(([x, y]) => [tx(x), ty(y)] as [number, number]);
         if (pts.length >= 3)
           entities.push(lwPolyline("NEIGHBOR_PARCELS", pts, true));
       }
@@ -323,18 +329,16 @@ function buildDxf(
     const c = outerCentroid(nb.polygons);
     if (c && nb.jibun)
       entities.push(
-        dxfText("NEIGHBOR_LABEL", c[0], c[1], neighborLabelH, nb.jibun),
+        dxfText("NEIGHBOR_LABEL", tx(c[0]), ty(c[1]), neighborLabelH, nb.jibun),
       );
   }
 
-  // 대상 필지 (굵은 선, 마지막에 그려서 위에 표시)
+  // 대상 필지 (마지막에 그려서 위에 표시)
   for (const polygon of target.polygons) {
     for (const ring of polygon) {
-      const pts = ring.map(([x, y]) => [x, y] as [number, number]);
+      const pts = ring.map(([x, y]) => [tx(x), ty(y)] as [number, number]);
       if (pts.length >= 3)
-        entities.push(
-          lwPolyline("TARGET_PARCEL", pts, true),
-        );
+        entities.push(lwPolyline("TARGET_PARCEL", pts, true));
     }
   }
   const tc = outerCentroid(target.polygons);
@@ -342,20 +346,19 @@ function buildDxf(
     entities.push(
       dxfText(
         "TARGET_LABEL",
-        tc[0],
-        tc[1],
+        tx(tc[0]),
+        ty(tc[1]),
         targetLabelH,
         target.jibun || target.pnu,
       ),
     );
 
-  // 출처 문구
-  const noteX = (bbox.minX + bbox.maxX) / 2;
-  const noteY = bbox.minY - targetLabelH * 1.5;
+  // 출처 문구 (원점 기준 bbox 하단 아래)
   const noteH = Math.max(targetLabelH * 0.4, 0.15);
   const today = new Date().toISOString().slice(0, 10);
-  const note =
-    `Source: VWorld(MOLIT) LP_PA_CBND_BUBUN / CRS: EPSG:5186 / Date: ${today} / ${addr} / For reference only`;
+  const note = `출처: VWorld(국토교통부) / 좌표계: EPSG:5186(원점이동) / ${today} / ${addr} / 참고용`;
+  const noteX = 0;
+  const noteY = ty(bbox.minY) - targetLabelH * 1.5;
   entities.push(dxfText("SOURCE_NOTE", noteX, noteY, noteH, note));
 
   // 레이어 테이블
@@ -371,18 +374,26 @@ function buildDxf(
     )
     .join("\n");
 
+  // 원점 이동된 bbox 범위
+  const extMinX = tx(bbox.minX).toFixed(3);
+  const extMinY = ty(bbox.minY).toFixed(3);
+  const extMaxX = tx(bbox.maxX).toFixed(3);
+  const extMaxY = ty(bbox.maxY).toFixed(3);
+
   const header = [
     g(0, "SECTION"),
     g(2, "HEADER"),
     g(9, "$ACADVER"),
-    g(1, "AC1009"),  // R12 — 범용 최소 포맷
+    g(1, "AC1009"),
+    g(9, "$DWGCODEPAGE"),
+    g(3, "KS_C_5601-1987"),   // CP949 한국어 코드페이지
     g(9, "$EXTMIN"),
-    g(10, bbox.minX.toFixed(3)),
-    g(20, bbox.minY.toFixed(3)),
-    g(30, "0.000"),  // Z좌표 필수 — 없으면 일부 CAD가 헤더 파싱 실패
+    g(10, extMinX),
+    g(20, extMinY),
+    g(30, "0.000"),
     g(9, "$EXTMAX"),
-    g(10, bbox.maxX.toFixed(3)),
-    g(20, bbox.maxY.toFixed(3)),
+    g(10, extMaxX),
+    g(20, extMaxY),
     g(30, "0.000"),
     g(0, "ENDSEC"),
   ].join("\n");
@@ -507,9 +518,12 @@ export async function GET(req: NextRequest) {
   const safe = addr.slice(0, 20).replace(/[/\\:*?"<>|]/g, "_");
   const filename = `지적도_${safe}.dxf`;
 
-  return new NextResponse(dxf, {
+  // CP949로 인코딩 — $DWGCODEPAGE KS_C_5601-1987와 일치, 한글 텍스트 정상 표시
+  const dxfBuffer = iconv.encode(dxf, "cp949");
+
+  return new NextResponse(dxfBuffer, {
     headers: {
-      "Content-Type": "application/dxf",
+      "Content-Type": "application/octet-stream",
       "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
     },
   });

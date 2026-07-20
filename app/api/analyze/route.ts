@@ -34,11 +34,13 @@ export async function POST(req: NextRequest) {
     // STEP 2: 건폐율·용적률
     const legalRates    = zoneName ? await fetchZoneRates(zoneName) : null;
     const ordinanceRule = zoneName ? getOrdinanceRates(addrInfo.siNm ?? "", zoneName) : null;
-    const effectiveRule = ordinanceRule;
+    // 조례 미등록 지역은 국토계획법 법정 상한으로 fallback (densityRuleStatus로 구분)
+    const effectiveRule = ordinanceRule
+      ?? (legalRates ? { 건폐율: legalRates.건폐율법정최대, 용적률: legalRates.용적률법정최대 } : null);
     const densityRuleStatus = ordinanceRule
       ? "지자체 조례 기준 적용"
       : legalRates
-        ? "지자체 조례 기준 미등록 — 법정 최대치는 참고값으로만 제공"
+        ? "법정 기준 잠정 적용 (조례 미등록 — 실제 조례 확인 필요)"
         : "용도지역 기준 미확인";
 
     // STEP 3: 면적 계산

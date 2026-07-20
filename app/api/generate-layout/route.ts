@@ -1222,50 +1222,99 @@ function buildNorthSectionSvg(
   return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="auto" viewBox="0 0 ${W} ${H}" font-family="sans-serif">${els}</svg>`;
 }
 
-// ── DXF (R2007 / AC1021) 생성 — 층별 3D LINE + 실 레이아웃 ──────────────────
+// ── DXF (R12 / AC1009) 생성 — 층별 3D LINE + 실 레이아웃 ───────────────────
+// AC1009 선택 이유: R2007(AC1021)은 BLOCKS/OBJECTS/CLASSES 섹션 + 전체 테이블이
+// 필수라 구조가 복잡. AC1009는 모든 CAD 프로그램이 읽을 수 있는 안전한 최소 포맷.
 function buildDxf(input: LayoutInput, 가로: number, 세로: number, 층고: number): string {
   const out: string[] = [];
   const p = (...args: (string | number)[]) => args.forEach(a => out.push(String(a)));
 
   const 층수 = input.층수;
   const ACI = [1, 3, 4, 5, 6, 2, 30, 40]; // AutoCAD Color Index
+  const 대지변 = Math.sqrt(input.대지면적);
+  const ox     = (대지변 - 가로) / 2;
+  const oy     = (대지변 - 세로) / 2;
+  const totalH = 층수 * 층고;
 
-  // ── HEADER ──
+  // ── HEADER ──────────────────────────────────────────────────────────────────
   p("0","SECTION","2","HEADER");
-  p("9","$ACADVER","1","AC1021");   // R2007 — UTF-8 지원
-  p("9","$INSUNITS","70","6");      // 6 = 미터
-  p("9","$MEASUREMENT","70","1");   // 1 = 미터계
+  p("9","$ACADVER","1","AC1009");          // R12 — 범용 최소 포맷
+  p("9","$INSUNITS","70","6");             // 6 = 미터
+  p("9","$MEASUREMENT","70","1");          // 1 = 미터계
+  p("9","$EXTMIN",
+    "10","0.000","20",(-(대지변*0.15)).toFixed(3),"30","0.000");
+  p("9","$EXTMAX",
+    "10",(대지변*1.1).toFixed(3),"20",(대지변*1.1).toFixed(3),"30",totalH.toFixed(3));
   p("0","ENDSEC");
 
-  // ── TABLES (레이어 정의) ──
+  // ── TABLES ──────────────────────────────────────────────────────────────────
   p("0","SECTION","2","TABLES");
-  p("0","TABLE","2","LAYER","70",String(층수 * 2 + 2));
-  p("0","LAYER","2","SITE",  "70","0","62","8", "6","CONTINUOUS");
-  p("0","LAYER","2","LABEL", "70","0","62","7", "6","CONTINUOUS");
+
+  // VPORT (빈 테이블 필수)
+  p("0","TABLE","2","VPORT","70","0");
+  p("0","ENDTAB");
+
+  // LTYPE — DASHED 레이어에서 참조하므로 반드시 정의해야 함
+  p("0","TABLE","2","LTYPE","70","4");
+  p("0","LTYPE","2","BYBLOCK",    "70","0","3","","72","65","73","0","40","0.0");
+  p("0","LTYPE","2","BYLAYER",    "70","0","3","","72","65","73","0","40","0.0");
+  p("0","LTYPE","2","CONTINUOUS", "70","0","3","Solid line","72","65","73","0","40","0.0");
+  // DASHED: 0.5m 대시 + 0.25m 공백 (73=2 elements, 40=0.75 total)
+  p("0","LTYPE","2","DASHED","70","0","3","__ __ __ __","72","65","73","2","40","0.75");
+  p("49","0.5","49","-0.25");
+  p("0","ENDTAB");
+
+  // LAYER
+  const layerDefs = 3 + 층수 * 2; // 0 + SITE + LABEL + (F{n} + F{n}_RM) * 층수
+  p("0","TABLE","2","LAYER","70",String(layerDefs));
+  p("0","LAYER","2","0",    "70","0","62","7","6","CONTINUOUS");
+  p("0","LAYER","2","SITE", "70","0","62","8","6","CONTINUOUS");
+  p("0","LAYER","2","LABEL","70","0","62","7","6","CONTINUOUS");
   for (let i = 0; i < 층수; i++) {
     const c = String(ACI[i % ACI.length]);
-    p("0","LAYER","2",`F${i+1}`,     "70","0","62",c,"6","CONTINUOUS");
-    p("0","LAYER","2",`F${i+1}_RM`,  "70","0","62",c,"6","DASHED");
+    p("0","LAYER","2",`F${i+1}`,    "70","0","62",c,"6","CONTINUOUS");
+    p("0","LAYER","2",`F${i+1}_RM`,"70","0","62",c,"6","DASHED");
   }
-  p("0","ENDTAB","0","ENDSEC");
+  p("0","ENDTAB");
 
-  // ── ENTITIES ──
+  // STYLE — TEXT 엔티티 사용 시 반드시 정의 필요
+  p("0","TABLE","2","STYLE","70","1");
+  p("0","STYLE","2","STANDARD","70","0","40","0.0","41","1.0",
+    "50","0.0","71","0","42","2.5","3","txt","4","");
+  p("0","ENDTAB");
+
+  // VIEW, UCS, APPID, DIMSTYLE (빈 테이블)
+  p("0","TABLE","2","VIEW","70","0");
+  p("0","ENDTAB");
+  p("0","TABLE","2","UCS","70","0");
+  p("0","ENDTAB");
+  p("0","TABLE","2","APPID","70","1");
+  p("0","APPID","2","ACAD","70","0");
+  p("0","ENDTAB");
+  p("0","TABLE","2","DIMSTYLE","70","0");
+  p("0","ENDTAB");
+
+  p("0","ENDSEC");
+
+  // ── BLOCKS (빈 섹션 — R12도 있어야 안전) ────────────────────────────────────
+  p("0","SECTION","2","BLOCKS");
+  p("0","ENDSEC");
+
+  // ── ENTITIES ────────────────────────────────────────────────────────────────
   p("0","SECTION","2","ENTITIES");
 
-  // LINE 하나 그리기 (3D 좌표)
   const line = (layer: string, x1: number, y1: number, x2: number, y2: number, z: number) => {
     p("0","LINE","8",layer,
       "10",x1.toFixed(3),"20",y1.toFixed(3),"30",z.toFixed(3),
       "11",x2.toFixed(3),"21",y2.toFixed(3),"31",z.toFixed(3));
   };
 
-  // 닫힌 사각형 = 4개 LINE
   const rect = (layer: string, x1: number, y1: number, x2: number, y2: number, z: number) => {
     line(layer,x1,y1,x2,y1,z); line(layer,x2,y1,x2,y2,z);
     line(layer,x2,y2,x1,y2,z); line(layer,x1,y2,x1,y1,z);
   };
 
-  // TEXT 엔티티 (중앙 정렬)
+  // TEXT — R12 규격: 72(수평)→73(수직)→11/21/31(정렬점) 순서 준수
   const text = (layer: string, x: number, y: number, z: number, txt: string, h = 0.35) => {
     p("0","TEXT","8",layer,
       "10",x.toFixed(3),"20",y.toFixed(3),"30",z.toFixed(3),
@@ -1275,16 +1324,12 @@ function buildDxf(input: LayoutInput, 가로: number, 세로: number, 층고: nu
   };
 
   // 대지 경계 (Z=0)
-  const 대지변 = Math.sqrt(input.대지면적);
   rect("SITE", 0, 0, 대지변, 대지변, 0);
-  text("LABEL", 대지변/2, -1.2, 0, `대지 ${input.대지면적.toFixed(0)}m² (${대지변.toFixed(1)}×${대지변.toFixed(1)}m)`, 0.45);
+  text("LABEL", 대지변/2, -1.2, 0, `DAE-JI ${input.대지면적.toFixed(0)}m2 (${대지변.toFixed(1)}x${대지변.toFixed(1)}m)`, 0.45);
 
   // 건물 위치 (대지 중앙)
-  const ox = (대지변 - 가로) / 2;
-  const oy = (대지변 - 세로) / 2;
-
   for (let i = 0; i < 층수; i++) {
-    const z = i * 층고;
+    const z  = i * 층고;
     const fl = `F${i+1}`;
     const rm = `F${i+1}_RM`;
 
@@ -1295,14 +1340,12 @@ function buildDxf(input: LayoutInput, 가로: number, 세로: number, 층고: nu
     if (i === 0) {
       [[ox,oy],[ox+가로,oy],[ox+가로,oy+세로],[ox,oy+세로]].forEach(([cx,cy]) => {
         line("SITE", cx!, cy!, cx!, cy!, 0);
-        line("SITE", cx!, cy!, cx!, cy!, 층수 * 층고);
+        line("SITE", cx!, cy!, cx!, cy!, totalH);
       });
     }
 
-    // 층 번호 라벨
-    text("LABEL", ox+가로/2, oy+세로/2, z+층고*0.5, `${i+1}F  EL+${z.toFixed(1)}m`, 0.55);
+    text("LABEL", ox+가로/2, oy+세로/2, z+층고*0.5, `${i+1}F EL+${z.toFixed(1)}m`, 0.55);
 
-    // 실 레이아웃
     const rooms = generateFloorRooms(input.용도, 가로, 세로, i+1, 층수);
     for (const r of rooms) {
       const rx1=ox+r.x, ry1=oy+r.y, rx2=rx1+r.w, ry2=ry1+r.h;
@@ -1310,12 +1353,12 @@ function buildDxf(input: LayoutInput, 가로: number, 세로: number, 층고: nu
       const cx=(rx1+rx2)/2, cy=(ry1+ry2)/2;
       const fh = Math.max(0.20, Math.min(0.40, Math.min(r.w, r.h)*0.14));
       text(rm, cx, cy+fh*0.7, z, r.label, fh);
-      text(rm, cx, cy-fh*0.7, z, `${(r.w*r.h).toFixed(1)}m²`, fh*0.75);
+      text(rm, cx, cy-fh*0.7, z, `${(r.w*r.h).toFixed(1)}m2`, fh*0.75);
     }
   }
 
   // 최상층 지붕선
-  rect("SITE", ox, oy, ox+가로, oy+세로, 층수*층고);
+  rect("SITE", ox, oy, ox+가로, oy+세로, totalH);
 
   p("0","ENDSEC","0","EOF");
   return out.join("\n");
