@@ -365,9 +365,25 @@ function buildDxf(
     g(0, "ENDSEC"),
   ].join("\n");
 
+  // LTYPE 테이블 — LAYER가 참조하는 CONTINUOUS 선 종류가 먼저 정의되어야 함
+  const ltypeTable = [
+    g(0, "TABLE"),
+    g(2, "LTYPE"),
+    g(70, 1),
+    g(0, "LTYPE"),
+    g(2, "CONTINUOUS"),
+    g(70, 0),
+    g(3, "Solid line"),
+    g(72, 65),
+    g(73, 0),
+    g(40, 0.0),
+    g(0, "ENDTAB"),
+  ].join("\n");
+
   const tables = [
     g(0, "SECTION"),
     g(2, "TABLES"),
+    ltypeTable,
     g(0, "TABLE"),
     g(2, "LAYER"),
     g(70, layers.length),
