@@ -61,16 +61,20 @@ async function fetchByPnu(pnu: string): Promise<Parcel | null> {
   }
 }
 
-/** WGS84 lat/lng 중심 + radius(m)로 주변 필지 조회, 결과는 EPSG:5186 좌표 */
+/**
+ * WGS84 bbox로 주변 필지를 EPSG:4326으로 조회한 뒤,
+ * 대상 필지 EPSG:5186 중심(cx5186, cy5186)을 기준으로 미터 좌표로 변환.
+ * VWorld API가 WGS84 geomFilter + EPSG:5186 crs 조합 시
+ * 좌표를 실제로 EPSG:4326으로 반환하는 경우가 있어 명시적으로 변환.
+ */
 async function fetchByBBox(
   lat: number,
   lng: number,
   radius: number,
+  cx5186: number,
+  cy5186: number,
   excludePnu?: string,
 ): Promise<Parcel[]> {
-  // VWorld LP_PA_CBND_BUBUN은 geomFilter가 crs와 같은 좌표계여야 함.
-  // EPSG:5186 bbox로 조회 시 응답이 없는 경우가 있어 WGS84 bbox로 조회하고
-  // 결과 좌표계는 EPSG:5186으로 받는다.
   const M_PER_LAT = 111320;
   const mPerLng = M_PER_LAT * Math.cos((lat * Math.PI) / 180);
   const dLat = radius / M_PER_LAT;
@@ -82,9 +86,9 @@ async function fetchByBBox(
     data: "LP_PA_CBND_BUBUN",
     key: vkey(),
     domain: "localhost",
-    geomFilter,           // WGS84(EPSG:4326) bbox
+    geomFilter,
     format: "json",
-    crs: "EPSG:5186",    // 결과 좌표계는 EPSG:5186
+    crs: "EPSG:4326",   // WGS84로 확실하게 받기
     size: "1000",
     page: "1",
   });
@@ -99,9 +103,25 @@ async function fetchByBBox(
         geometry?: { type?: string; coordinates?: unknown };
         properties?: Record<string, string>;
       }>;
+
     return features
       .filter((f) => !excludePnu || f.properties?.pnu !== excludePnu)
-      .map(parseFeature);
+      .map((f) => {
+        const parcel = parseFeature(f);
+        // WGS84(lng, lat) → EPSG:5186 근사 변환
+        // 대상 필지 중심(lat, lng) ↔ (cx5186, cy5186) 를 기준으로 선형 변환
+        return {
+          ...parcel,
+          polygons: parcel.polygons.map((poly) =>
+            poly.map((ring) =>
+              ring.map(([lngP, latP]) => [
+                cx5186 + (lngP - lng) * mPerLng,
+                cy5186 + (latP - lat) * M_PER_LAT,
+              ] as [number, number]),
+            ),
+          ),
+        };
+      });
   } catch {
     return [];
   }
@@ -509,9 +529,11 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // 3. bbox 계산 및 주변 필지 조회 (WGS84 bbox → EPSG:5186 결과)
+  // 3. bbox 계산 및 주변 필지 조회
   const bbox = computeBBox(target, radius);
-  const neighbors = await fetchByBBox(lat, lng, radius, target.pnu);
+  const cx5186 = (bbox.minX + bbox.maxX) / 2;
+  const cy5186 = (bbox.minY + bbox.maxY) / 2;
+  const neighbors = await fetchByBBox(lat, lng, radius, cx5186, cy5186, target.pnu);
 
   // 4. DXF 생성
   const dxf = buildDxf(target, neighbors, bbox, addr);
