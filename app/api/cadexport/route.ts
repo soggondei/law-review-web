@@ -223,6 +223,20 @@ function g(code: number, value: string | number): string {
   return `${code}\n${value}`;
 }
 
+// DXF AC1009은 ASCII 전용 — 한글 등 non-ASCII는 \U+XXXX 이스케이프 필요
+function dxfStr(str: string): string {
+  let out = "";
+  for (const ch of str) {
+    const code = ch.charCodeAt(0);
+    if (code > 127) {
+      out += `\\U+${code.toString(16).toUpperCase().padStart(4, "0")}`;
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
 // AC1009(R12) 호환 폴리라인 — LWPOLYLINE은 R2000+ 전용이므로 사용 불가
 function lwPolyline(
   layer: string,
@@ -266,7 +280,7 @@ function dxfText(
     g(20, y.toFixed(3)),
     g(30, 0),
     g(40, height.toFixed(3)),
-    g(1, text),
+    g(1, dxfStr(text)),
     g(72, 1),          // horizontal: center
     g(11, x.toFixed(3)), // second alignment point
     g(21, y.toFixed(3)),
@@ -344,7 +358,7 @@ function buildDxf(
   const noteH = Math.max(targetLabelH * 0.4, 0.15);
   const today = new Date().toISOString().slice(0, 10);
   const note =
-    `출처: 브이월드(국토교통부) LP_PA_CBND_BUBUN / 좌표계: EPSG:5186 / 생성: ${today} / ${addr} / 참고용 — 법적 효력 없음`;
+    `Source: VWorld(MOLIT) LP_PA_CBND_BUBUN / CRS: EPSG:5186 / Date: ${today} / ${addr} / For reference only`;
   entities.push(dxfText("SOURCE_NOTE", noteX, noteY, noteH, note));
 
   // 레이어 테이블
@@ -427,6 +441,13 @@ function buildDxf(
     g(0, "ENDSEC"),
   ].join("\n");
 
+  // BLOCKS 섹션 — AC1009에서 필수 (비어 있더라도)
+  const blocks = [
+    g(0, "SECTION"),
+    g(2, "BLOCKS"),
+    g(0, "ENDSEC"),
+  ].join("\n");
+
   const entSection = [
     g(0, "SECTION"),
     g(2, "ENTITIES"),
@@ -435,7 +456,7 @@ function buildDxf(
     g(0, "EOF"),
   ].join("\n");
 
-  return [header, tables, entSection].join("\n");
+  return [header, tables, blocks, entSection].join("\n");
 }
 
 // ── GET handler ───────────────────────────────────────────────────────────────
